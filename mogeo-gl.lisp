@@ -7,6 +7,9 @@
 (defparameter *obj-w* 32)
 (defparameter *obj-h* 32)
 
+(defparameter *obj-w/2* (floor *obj-w* 2))
+(defparameter *obj-h/2* (floor *obj-h* 2))
+
 (defparameter *tate* 20)
 (defparameter *yoko* 30)
 
@@ -25,6 +28,21 @@
 (defparameter *nokonoko* (gamekit:vec4 0 0.678 0 1))
 (defparameter *flag* (gamekit:vec4 0.722 0.973 0.094 1))
 (defparameter *kinoko* (gamekit:vec4 0.973 0.22 0 1))
+(defparameter *flower* (gamekit:vec4 0.973 0.72 0.01 1))
+;; 1:地面ブロック 2:壊せるブロック 3:土管
+;; 4:1コインはてな 5:きのこetcはてな 6:スターはてな 7:1UPはてな
+;; 8:隠し1UPはてな 9:10コインはてな
+;; a:クリボー b:ノコノコ
+;; z:入れる土管 y:ゴール
+(defparameter *obj-type-list*
+  `(1 (,*brown* :hard-block) 2 (,*brown2* :soft-block) 3 (,*green* :dokan)
+    4 (,*yellow* :1coin) 5 (,*yellow* :item) 6 (,*yellow* :star)
+    7 (,*yellow* :1up) 8 (,*light-blue* :hide-1up) 9 (,*yellow* :10coin)
+    a (,*kuribo* :kuribo) b (,*nokonoko* :nokonoko)
+    y (,*flag* :goal) z (,*green* :enter-dokan)))
+
+(defparameter *stroke-paint* (gamekit:vec4 0 0 0 1))
+(defparameter *background-pos* (gamekit:vec2 0 0))
 
 (defparameter *p* nil) ;;player
 (defparameter *field* nil)
@@ -34,7 +52,7 @@
 
 (defclass keystate ()
   ((left
-     :accessor left
+    :accessor left
      :initform nil
      :initarg :left)
    (right
@@ -63,10 +81,30 @@
     :accessor pos
     :initform (gamekit:vec2 0 0) ;; x y
     :initarg :pos)
-    (height
-      :accessor height
-      :initform *obj-h*
-      :initarg :height)))
+   (x
+    :accessor x
+    :initform 0
+    :initarg :x)
+   (x2
+    :accessor x2
+    :initform 0
+    :initarg :x2)
+   (y
+    :accessor y
+    :initform 0
+    :initarg :y)
+   (y2
+    :accessor y2
+    :initform 0
+    :initarg :y2)
+   (width
+    :accessor width
+    :initform *obj-w*
+    :initarg :width)
+   (height
+    :accessor height
+    :initform *obj-h*
+    :initarg :height)))
 
 (defclass chara (obj)
   ((ax
@@ -93,26 +131,48 @@
     :accessor jump
     :initform nil
     :initarg :jump)
-   (scroll
-    :accessor scroll
-    :initform 0
-    :initarg :scroll)
-   (field-w-max
-    :accessor field-w-max
-    :initform 0
-    :initarg :field-w-max)
    (fall ;;落下
     :accessor fall
     :initform nil
     :initarg :fall)
-    (state ;;キャラの状態 or アイテムの種類
-      :accessor state
-      :initform :small
-      :initarg :state)
-    (items ;;ステージ上に出現したアイテム
-      :accessor items
-      :initform nil
-      :initarg :items)))
+   (state ;;キャラの状態 or アイテムの種類
+    :accessor state
+    :initform :small
+    :initarg :state)
+   (u-hit ;;上部当たり判定フラグかつ当たったobjを入れる
+    :accessor u-hit
+    :initform nil
+    :initarg :u-hit)
+   (d-hit ;;下部当たり判定フラグ
+    :accessor d-hit
+    :initform nil
+    :initarg :d-hit)
+   (r-hit ;;右部当たり判定フラグ
+    :accessor r-hit
+    :initform nil
+    :initarg :r-hit)
+   (l-hit ;;左部当たり判定フラグ
+    :accessor l-hit
+    :initform nil
+    :initarg :l-hit)))
+
+(defclass player (chara)
+  ((field-w-max
+   :accessor field-w-max
+   :initform 0
+   :initarg :field-w-max)
+   (scroll
+    :accessor scroll
+    :initform 0
+    :initarg :scroll)
+   (muteki-time
+    :accessor moteki-time
+    :initform 0
+    :initarg :muteki-time)
+   (move-obj ;;ステージ上に出現したアイテムとか敵
+    :accessor move-obj
+    :initform nil
+    :initarg :move-obj)))
 
 (gamekit:defgame mogeo () ()
   (:viewport-width +screen-w+)
@@ -120,11 +180,11 @@
   (:viewport-title "スーパーもげおワールド"))
 
 (defun rect-center-x (pos)
-  (+ (gamekit:x pos) (floor *obj-w* 2))) 
+  (+ (gamekit:x pos) *obj-w/2*)) 
 
 ;;ステージデータ生成
 (defun create-field (field-obj p)
-  (with-slots (field-w-max) p
+  (with-slots (field-w-max move-obj) p
     (let* ((tate (length field-obj))
            (yoko (length (car field-obj)))
            (arr (make-array (list tate yoko) :initial-contents field-obj))
@@ -134,31 +194,43 @@
             do (loop for x below yoko
                      do (let ((obj-type (aref arr y x)))
                           (when (not (eq obj-type 0))
-                            (let ((obj-pos (gamekit:vec2 (* x 32) (* (- (1- tate) y) 32)))
-                                  (color
-                                    (case obj-type
-                                      (1 *brown*)
-                                      (2 *brown2*) 
-                                      ((3 z) *green*)
-                                      (8 *light-blue*)
-                                      ((4 5 6 7 9)
-                                       *yellow*)
-                                      (a *kuribo*)
-                                      (b *nokonoko*)
-                                      (y *flag*))))
-                              (push
-                                (make-instance 'obj :pos obj-pos
-                                                    :color color
-                                                    :obj-type obj-type)
-                                obj-list))))))
+                            (let* ((obj-x (* x 32)) (obj-x2 (+ obj-x *obj-w*))
+				   (obj-y (* (- (1- tate) y) 32)) (obj-y2 (+ obj-y *obj-h*))
+				   (obj-pos (gamekit:vec2 obj-x obj-y))
+				   (hoge (getf *obj-type-list* obj-type))
+				   (color (car hoge)) (name (cadr hoge)))
+			      (cond
+				((or (integerp obj-type)
+				     (eq 'y obj-type))
+				 (push
+				  (make-instance 'obj :pos obj-pos :x obj-x :x2 obj-x2
+						      :y obj-y :y2 obj-y2
+						      :width *obj-w* :height *obj-h*
+						      :color color
+						      :obj-type name)
+				  obj-list))
+				(t
+				 (push
+				  (make-instance 'chara :pos (gamekit:vec2 obj-x obj-y)
+							:lastpos (gamekit:vec2 obj-x obj-y)
+							:x obj-x :x2 obj-x2
+							:y obj-y :y2 obj-y2
+							:width *obj-w* :height *obj-h*
+							:vx -1 :vy 0 :fall nil :jump nil
+							:color color
+							:obj-type name)
+				  move-obj))))))))
       (make-array (length obj-list) :initial-contents obj-list))))
 
 (defun init-data ()
-  (setf *p* (make-instance 'chara :pos (gamekit:vec2 0 64) :lastpos (gamekit:vec2 0 64)
-                                  :vx 2 :vy 0)
+  (setf *p* (make-instance 'player :pos (gamekit:vec2 0 64) :lastpos (gamekit:vec2 0 64)
+				   :x 0 :x2 *obj-w* :y 64 :y2 (+ 64 *obj-h*)
+				   :width *obj-w* :height *obj-h*
+				   :vx 2 :vy 0)
         *field* (create-field *stage1-1* *p*)
         *keystate* (make-instance 'keystate)))
 
+;;キー入力
 (defun input-key ()
   (with-slots (left right z x) *keystate*
     (gamekit:bind-button :left :pressed
@@ -181,39 +253,42 @@
         (lambda ()
           (gamekit:stop)))))
 
+;;描画
 (defun draw-field ()
   (with-slots (scroll) *p*
     (loop :for obj across *field*
-          :do (with-slots (pos color obj-type) obj
-                (when (and (>= (+ (gamekit:x pos) *obj-w*) scroll) (>= (+ scroll +screen-w+) (gamekit:x pos)))
-                  (let ((new-pos (gamekit:vec2 (- (gamekit:x pos) scroll) (gamekit:y pos))))
-                    (gamekit:draw-rect new-pos *obj-w* *obj-h* :fill-paint color
-                                                              :stroke-paint (gamekit:vec4 0 0 0 1))))))))
+          :do (with-slots (pos x x2 y y2 color obj-type width height) obj
+                (when (and (>= x2 scroll) ;;画面範囲内かどうか
+			   (>= (+ scroll +screen-w+) x))
+                  (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+                    (gamekit:draw-rect new-pos width height :fill-paint color
+							    :stroke-paint *stroke-paint*)))))))
+
 ;;背景表示 
 (defun draw-background ()
-  (gamekit:draw-rect (gamekit:vec2 0 0) +screen-w+ +screen-h+ :fill-paint *light-blue*))
+  (gamekit:draw-rect *background-pos* +screen-w+ +screen-h+ :fill-paint *light-blue*))
 
+;;プレイヤー描画
 (defun draw-player ()
-  (with-slots (pos scroll height) *p*
-    (let ((new-pos (gamekit:vec2 (- (gamekit:x pos) scroll) (gamekit:y pos))))
-      (gamekit:draw-rect new-pos *obj-w* height :fill-paint *red*)
-      (gamekit:draw-line (gamekit:vec2 (gamekit:x new-pos) (+ (gamekit:y new-pos) 6))
-                          (gamekit:vec2 (+ *obj-w* (gamekit:x new-pos)) (+ (gamekit:y new-pos) 6))
-                          (gamekit:vec4 0 0 1 1)))))
+  (with-slots (pos x y scroll width height muteki-time) *p*
+    (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+      (when (zerop (mod muteki-time 5))
+	(gamekit:draw-rect new-pos width height :fill-paint *red*)))))
 
-(defun draw-items ()
-  (with-slots (items scroll) *p*
-    (dolist (item items)
-      (with-slots (pos color) item
-        (let ((new-pos (gamekit:vec2 (- (gamekit:x pos) scroll) (gamekit:y pos))))
-          (gamekit:draw-rect new-pos *obj-w* *obj-h* :fill-paint color
-                                                     :stroke-paint (gamekit:vec4 0 0 0 1)))))))
+;;アイテムとか敵描画
+(defun draw-move-obj ()
+  (with-slots (move-obj scroll) *p*
+    (dolist (obj move-obj)
+      (with-slots (pos x y color width height) obj
+        (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+          (gamekit:draw-rect new-pos width height :fill-paint color
+						  :stroke-paint *stroke-paint*))))))
 
 ;;座標を表示するよ
 (defun draw-debug ()
   (with-slots (left right z) *keystate*
-    (with-slots (pos vx vy) *p*
-      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d" (gamekit:x pos) (gamekit:y pos) vx vy)
+    (with-slots (pos vx vy x y lastpos muteki-time) *p*
+      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d muteki:~d" x y vx vy muteki-time)
                           (gamekit:vec2 100 300)))))
     ;;(gamekit:draw-text (format nil " left    :~:[ no ~; yes ~] " left) (gamekit:vec2 100 100))
     ;;(gamekit:draw-text (format nil " right    :~:[ no ~; yes ~] " right) (gamekit:vec2 100 200))
@@ -230,39 +305,54 @@
         for line in *text-buffer*
         do
         (gamekit:draw-text line (gamekit:vec2 200 (- 580 (* i 20))))))
-    
-;;アイテムが動くよ
-(defun update-items ()
-  (with-slots (items) *p*
-    (dolist (item items)
-      (with-slots (pos vx lastpos fall jump vy) item
-        (incf (gamekit:x pos) vx)
-        (when (or fall jump)
-          (setf vy -0.5))
-        (let ((temp (gamekit:y pos)))
-          (incf (gamekit:y pos) (+ (- (gamekit:y pos) (gamekit:y lastpos)) vy))
-          (setf (gamekit:y lastpos) temp))))))
+
+
+;;横にしか動かない
+(defun kuribo-move (obj)
+  (with-slots (pos x x2 y y2 vx lastpos fall jump vy width height) obj
+    (setf (gamekit:x lastpos) x)
+    (incf x vx) ;;x方向
+    (when (or fall jump) ;;落下orジャンプ
+      (setf vy -0.5))
+    (let ((temp y)) ;;y方向
+      (incf y (+ (- y (gamekit:y lastpos)) vy))
+      (setf (gamekit:y lastpos) temp
+	    x2 (+ x width)
+	    y2 (+ y height)))))
+
+;;敵とアイテムが動くよ
+(defun update-move-obj ()
+  (with-slots (move-obj) *p*
+    (dolist (obj move-obj)
+      (with-slots (obj-type) obj
+	(case obj-type
+	  ((:kuribo :nokonoko :kinoko)
+	   (kuribo-move obj)))))))
+	     
 
 
 ;;プレーヤーが動くよ🧢👨
 (defun update-player ()
-  (with-slots (left right z x) *keystate*
-    (with-slots (pos vx vy lastpos jump fall scroll) *p*
-      (when left
-        (decf (gamekit:x pos) vx))
-      (when right
-        (incf (gamekit:x pos) vx))
-      (if (and x (null jump) (null fall))
-          (setf jump t
-                vy 18)
-          (when (or jump fall)
-            (setf vy -1)))
-      (when z
-        (incf (gamekit:x pos) vx))
-      ;;プレイヤーのy座標更新
-      (let ((temp (gamekit:y pos)))
-        (incf (gamekit:y pos) (+ (- (gamekit:y pos) (gamekit:y lastpos)) vy))
-        (setf (gamekit:y lastpos) temp)))))
+  (with-slots (pos x x2 y y2 vx vy lastpos jump fall scroll width height muteki-time) *p*
+    (setf (gamekit:x lastpos) x)
+    (when (left *keystate*)
+      (decf x vx))
+    (when (right *keystate*)
+      (incf x vx))
+    (if (and (x *keystate*) (null jump) (null fall))
+	(setf jump t
+	      vy 18)
+	(when (or jump fall)
+	  (setf vy -1)))
+    (when (z *keystate*))
+    ;;プレイヤーのy座標更新
+    (let ((temp y))
+      (incf y (+ (- y (gamekit:y lastpos)) vy))
+      (setf (gamekit:y lastpos) temp
+	    x2 (+ x width)
+	    y2 (+ y height)))
+    (when (> muteki-time 0)
+      (decf muteki-time))))
 
 ;;     y 0 1 3 6 10 15 21 ...
 ;; lasty 0 0 1 3  6 10 15 ...
@@ -270,171 +360,159 @@
 
 ;;画面スクロール
 (defun update-scroll ()
-  (with-slots (pos scroll) *p*
-    (when (or (> (rect-center-x pos) (+ scroll +screen-center-x+))
-              (< (rect-center-x pos) (+ scroll +screen-center-x+)))
-      (setf scroll (max 0 (- (rect-center-x pos) +screen-center-x+ ))))))
+  (with-slots (pos x scroll) *p*
+    (let ((p-center (+ x *obj-w/2*)))
+      (when (or (> p-center (+ scroll +screen-center-x+))
+		(< p-center (+ scroll +screen-center-x+)))
+	(setf scroll (max 0 (- p-center +screen-center-x+)))))))
 
-;;プレイヤー当たり判定の判定
-(defun hit-player-obj (obj p-x p-x2 p-y p-y2 p-center)
-  (let* ((obj-pos (pos obj))
-         (obj-x (gamekit:x obj-pos))
-         (obj-x2 (+ obj-x *obj-w*))
-         (obj-y (gamekit:y obj-pos))
-         (obj-y2 (+ obj-y *obj-h*)))
+;;obj1とobj2の当たり判定の判定
+(defun obj-hit-p (obj1 obj2)
+  (let* ((obj1-x (x obj1)) (obj1-x2 (x2 obj1))
+	 (obj1-y (y obj1)) (obj1-y2 (y2 obj1))
+	 (obj1-center (+ obj1-x *obj-w/2*))
+	 (obj2-x (x obj2)) (obj2-x2 (x2 obj2))
+	 (obj2-y (y obj2)) (obj2-y2 (y2 obj2)))
     (cond
       ;;プレイヤーの下側とobjの上側 （プレイヤーの下側がオブジェクトの中にめり込んでいたらプレイヤーをオブジェクトの上に持ち上げる）
-      ((and (>= obj-x2 p-center obj-x)
-            (>= obj-y2 p-y) (< obj-y2 p-y2)
-            (< obj-y p-y) (< obj-y p-y2)) ;(< obj-y p-y)ならばかならず(< obj-y p-y2)
-        ;;(debug-format "~A (~A,~A) SITA HOSEI!" (get-universal-time) obj-x obj-y)
-        1) ;; ここまでよんだ
+      ((and (>= obj2-x2 obj1-center obj2-x)
+	    (>= obj2-y2 obj1-y) (< obj2-y2 obj1-y2)
+	    (< obj2-y obj1-y)) ;;(< obj2-y obj1-y2)) ;(< obj-y p-y)ならばかならず(< obj-y p-y2)
+       ;;(debug-format "~A (~A,~A) SITA HOSEI!" (get-universal-time) obj-x obj-y)
+       1) ;; ここまでよんだ
 
       ;;プレイヤーの上側とobjの下側当たり判定
-      ((and (>= obj-x2 p-center obj-x)
-            (> obj-y2 p-y) (> obj-y2 p-y2)
-            (> obj-y p-y) (< obj-y p-y2)) ;; 今ここを読んでいます ha2ne2
-        (debug-format "~A (~A,~A) (~A,~A) UE HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
-        2)
-;; 今からここ読みます。 6とは何でしょうか！
+      ((and (>= obj2-x2 obj1-center obj2-x)
+	    (> obj2-y2 obj1-y) (> obj2-y2 obj1-y2)
+	    (> obj2-y obj1-y) (< obj2-y obj1-y2)) ;; 今ここを読んでいます ha2ne2
+       ;;(debug-format "~A (~A,~A) (~A,~A) UE HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
+       2)
+      ;; 今からここ読みます。 6とは何でしょうか！
 
       ;;プレイヤーの左側とobjの右側 
-      ((and (or (> obj-y2 (+ p-y 6) obj-y)) ;;(> obj-y2 (- p-y2 6) obj-y))
-            (> obj-x2 p-x) (< obj-x2 p-x2)
-            (< obj-x p-x) (< obj-x p-x2))
-        (debug-format "~A (~A,~A) (~A,~A) HIDARI HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
-        3)
+      ((and (or (> obj2-y2 (+ obj1-y 6) obj2-y)) ;;(> obj-y2 (- p-y2 6) obj-y))
+	    (> obj2-x2 obj1-x) (< obj2-x2 obj1-x2)
+	    (< obj2-x obj1-x) (< obj2-x obj1-x2))
+       ;;(debug-format "~A (~A,~A) (~A,~A) HIDARI HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
+       3)
       ;;プレイヤーの右側とobjの左側
-      ((and (or (> obj-y2 (+ p-y 6) obj-y)) ;;(> obj-y2 (- p-y2 6) obj-y))
-            (> obj-x2 p-x) (> obj-x2 p-x2)
-            (> obj-x p-x) (< obj-x p-x2))
-        (debug-format "~A (~A,~A) (~A,~A) MIGI HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
-        4))))
+      ((and (or (> obj2-y2 (+ obj1-y 6) obj2-y)) ;;(> obj-y2 (- p-y2 6) obj-y))
+	    (> obj2-x2 obj1-x) (> obj2-x2 obj1-x2)
+	    (> obj2-x obj1-x) (< obj2-x obj1-x2))
+       ;;(debug-format "~A (~A,~A) (~A,~A) MIGI HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
+       4))))
 
 ;; プレイヤーとブロックがあたったら
 (defun hit-player-block (obj)
-  (with-slots (obj-type color pos) obj
-    (with-slots (state items) *p*
+  (with-slots (obj-type color x x2 y y2 pos height) obj
+    (with-slots (state move-obj) *p*
       (case obj-type
-        (2 (setf *field* (remove obj *field* :test #'equal)))
-        (5 (setf obj-type 1
-                color *brown*)
-            (case state
-              (:small (push (make-instance 'chara :vx 1 :state :kinoko :color *kinoko* :fall nil
-                                                  :pos (gamekit:vec2 (gamekit:x pos) (+ (gamekit:y pos) *obj-h*))
-                                                  :lastpos (gamekit:vec2 (gamekit:x pos) (+ (gamekit:y pos) *obj-h*)))
-                            items)))))
-      )))
+	(:soft-block ;;壊れるブロック
+	 (setf *field* (remove obj *field* :test #'equal)))
+	(:item ;;アイテムが出るハテナブロック
+	 (setf obj-type :hard-block
+	       color *brown*)
+	 (case state ;;プレイヤーの状態で出るアイテム変わる
+	   (:small (push (make-instance 'chara :vx 1 :vy 0 :state :kinoko :color *kinoko* :fall nil
+					       :width *obj-w* :height *obj-h*
+					       :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*) 
+					       :pos (gamekit:vec2 x y2)
+					       :obj-type :kinoko
+					       :lastpos (gamekit:vec2 x y2))
+			 move-obj))
+	   (:big (push (make-instance 'chara :vx 0 :vy 0 :state :flower :color *flower* :fall nil
+					     :width *obj-w* :height *obj-h*
+					     :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*) 
+					     :pos (gamekit:vec2 x y2)
+					     :obj-type :flower
+					     :lastpos (gamekit:vec2 x y2))
+		       move-obj))))))))
 
 ;;出現してるアイテムと障害物の当たり判定
-(defun hit-items-obj (items obj)
-  (when items
-    (let* ((obj-pos (pos obj)) (obj-x (gamekit:x obj-pos))
-           (obj-y (gamekit:y obj-pos)) (obj-x2 (+ obj-x *obj-w*))
-           (obj-y2 (+ obj-y *obj-h*)))
-      (dolist (item items)
-        (with-slots (jump fall vy vx) item
-          (let* ((i-pos (pos item))
-                (i-d) (i-u) (i-l) (i-r)  (hoge)
-                (i-center (rect-center-x i-pos))
-                (i-x (gamekit:x i-pos)) (i-x2 (+ i-x *obj-w*))
-                (i-y (gamekit:y i-pos)) (i-y2 (+ i-y *obj-h*)))
-            (case (hit-player-obj obj i-x i-x2 i-y i-y2 i-center)
-              (1 (setf i-d obj))
-              (2 (setf i-u obj))
-              (3 (setf i-l obj))
-              (4 (setf i-r obj)))
-            (when i-d
-              (setf hoge t vy 0
-                    (gamekit:y i-pos) obj-y2
-                    (gamekit:y (lastpos item)) obj-y2))
-            (when i-u
-              (setf (gamekit:y i-pos) (- obj-y *obj-h*)
-                    (gamekit:y (lastpos item)) (- obj-y *obj-h*)))
-            (when (and i-l
-                      (or (and i-d (null fall))
-                          (and fall (null i-d))))
-              (setf (gamekit:x i-pos) obj-x2
-                    vx (- vx)))
-            (when (and i-r
-                      (or (and i-d (null fall))
-                          (and fall (null i-d))))
-              (setf (gamekit:x i-pos) (- obj-x *obj-w*)
-                    vx (- vx)))
-            (if hoge
-                (setf jump nil fall nil)
-                (setf (fall item) t))))))))
 
-;;出現してるアイテムとobjの当たり判定
-(defun hit-player-items (items)
-  (when items
-    (dolist (item items)
-      (let* ((i-pos (pos item)) (item-type (state item))
-             (i-center (rect-center-x i-pos))
-             (i-x (gamekit:x i-pos)) (i-x2 (+ i-x *obj-w*))
-             (i-y (gamekit:y i-pos)) (i-y2 (+ i-y *obj-h*)))
-        (when (hit-player-obj *p* i-x i-x2 i-y i-y2 i-center)
-          (case item-type
-            (:kinoko (setf (state *p*) :big (height *p*) (* *obj-h* 2)))
-            (:flower (setf (state *p*) :fire))
-            (:star   (setf (state *p*) :muteki)))
-          (setf (items *p*) (remove item items :test #'equalp)))))))
 
-;;プレイヤー当たり判定 (アイテム 敵 障害物)
+;;出現してるアイテムとプレイヤーの当たり判定
+(defun hit-player-items ()
+  (with-slots (move-obj state height muteki-time) *p*
+    (dolist (obj move-obj)
+      (when (obj-hit-p *p* obj)
+	(case (obj-type obj)
+	  (:kuribo
+	   (cond
+	     ((and (= muteki-time 0)
+		   (eq state :small))
+	      (setf state :dead))
+	     (t (setf state :small
+		      muteki-time 100
+		      height *obj-h*))))
+	  (:kinoko (setf state :big
+			 height (* *obj-h* 2)
+			 move-obj (remove obj move-obj :test #'equalp)))
+	  (:flower (setf state :fire
+			 move-obj (remove obj move-obj :test #'equalp)))
+	  (:star   (setf state :muteki
+			 move-obj (remove obj move-obj :test #'equalp))))))))
+
+;;obj1とobj2がぶつかってたらobj2を保存
+(defun set-hit-obj (obj1 obj2)
+  (with-slots (u-hit d-hit r-hit l-hit) obj1
+    (case (obj-hit-p obj1 obj2)
+      (1 (setf d-hit obj2))
+      (2 (setf u-hit obj2))
+      (3 (setf l-hit obj2))
+      (4 (setf r-hit obj2)))))
+
+;;動くobjの位置補正
+(defun position-hosei (obj)
+  (with-slots (x x2 y y2 height width vy vx lastpos u-hit d-hit l-hit r-hit fall jump) obj
+    (when u-hit
+      (setf y (- (y u-hit) height)
+	    (gamekit:y lastpos) (- (y u-hit) height))
+      (when (eq (type-of obj) 'player) ;;プレイヤーの上部とブロックの下部があたったら
+	 (hit-player-block u-hit)))
+    (when (and l-hit
+	       (or (and d-hit (null fall))
+		   (and fall (null d-hit))))
+      (setf (gamekit:x lastpos) (x2 l-hit)
+	    x (x2 l-hit))
+      (when (eq (type-of obj) 'chara)
+	(when (> 0 vx)
+	  (setf vx (- vx)))))
+    (when (and r-hit
+	       (or (and d-hit (null fall))
+		   (and fall (null d-hit))))
+      (setf (gamekit:x lastpos) (- (x r-hit) width)
+	    x (- (x r-hit) width))
+      (when (eq (type-of obj) 'chara)
+	(when (> vx 0)
+	  (setf vx (- vx)))))
+    (if d-hit
+	(setf vy 0 jump nil fall nil
+	      y (y2 d-hit)
+	      (gamekit:y (lastpos obj)) (y2 d-hit))
+	(setf fall t))
+    (setf u-hit nil d-hit nil l-hit nil r-hit nil)))
+
+  
+;;プレイヤーとかの当たり判定 (アイテム 敵 障害物)
 (defun hit-player-objects ()
-  (with-slots (scroll vy jump fall items state) *p*
-    (let* ((p-pos (pos *p*))
-	         (hoge nil) ; 接地したか判定
-           (p-d nil) (p-u nil) (p-l nil) (p-r nil) ;;プレイヤーの上下左右の当たり判定
-           (p-center (rect-center-x p-pos))
-           (p-x (gamekit:x p-pos)) (p-x2 (+ p-x *obj-w*))
-           (p-y (gamekit:y p-pos)) (p-y2 (+ p-y *obj-h*)))
-      ;;(debug-format "hit-player: (px,py) = (~A,~A)" p-x p-y)
-      (hit-player-items items)
-      (loop :for obj across *field*
-            :for i from 0
-            :do (with-slots (obj-type) obj
-                  (when (or (integerp obj-type)
-                            (eq obj-type 'z))
-                    (hit-items-obj items obj)
-                    (case (hit-player-obj obj p-x p-x2 p-y p-y2 p-center)
-                      (1 (setf p-d obj))
-                      (2 
-                        (setf p-u obj)
-                        (hit-player-block obj))
-                      (3 (setf p-l obj))
-                      (4 (setf p-r obj))))))
-      (when p-d
-        (let* ((obj-pos (pos p-d))
-                (obj-y2 (+ (gamekit:y obj-pos) *obj-h*)))
-          (setf hoge t vy 0
-                (gamekit:y p-pos) obj-y2
-                (gamekit:y (lastpos *p*)) obj-y2)))
-      (when p-u
-        (let* ((obj-pos (pos p-u))
-              (obj-y (gamekit:y obj-pos)))
-          (setf (gamekit:y p-pos) (- obj-y *obj-h*)
-                (gamekit:y (lastpos *p*)) (- obj-y *obj-h*))))
-      (when (and p-l
-                (or (and p-d (null fall))
-                    (and fall (null p-d))))
-        (let* ((obj-pos (pos p-l))
-                (obj-x2 (+ (gamekit:x obj-pos) *obj-w*)))
-          (setf (gamekit:x p-pos) obj-x2)))
-      (when (and p-r
-                (or (and p-d (null fall))
-                    (and fall (null p-d))))
-        (let* ((obj-pos (pos p-r))
-                (obj-x (gamekit:x obj-pos)))
-          (setf (gamekit:x p-pos) (- obj-x *obj-w*))))
-      (if hoge
-          (setf jump nil fall nil)
-          (setf fall t)))))  ; 🐈🐈🐈🐈
+  (with-slots (scroll vy jump fall move-obj state width height) *p*
+    (hit-player-items) ;;プレイヤーとアイテムの当たり判定
+    ;;動くobjと動かないobjとの当たり判定
+    (loop :for obj across *field*
+	  :for i from 0
+	  :do (set-hit-obj *p* obj)
+	      (dolist (mobj move-obj)
+		(set-hit-obj mobj obj)))
+    (position-hosei *p*)
+    (dolist (mobj move-obj)
+      (position-hosei mobj))))
+;; 🐈🐈🐈🐈
 
 ;;ゲームループ？
 (defmethod gamekit:act ((app mogeo))
   (update-player)
-  (update-items)
+  (update-move-obj)
   (update-scroll)
   (hit-player-objects)
   (sleep 0.011))
@@ -444,7 +522,7 @@
   (draw-background)
   (draw-field)
   (draw-player)
-  (draw-items)
+  (draw-move-obj)
   (draw-debug)
   (draw-console))
 
