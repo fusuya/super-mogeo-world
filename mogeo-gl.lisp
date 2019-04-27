@@ -4,15 +4,19 @@
 (ql:quickload :trivial-gamekit)
 
 (load "stage.lisp")
+
+;;基本サイズ
 (defparameter *obj-w* 32)
 (defparameter *obj-h* 32)
 
 (defparameter *obj-w/2* (floor *obj-w* 2))
 (defparameter *obj-h/2* (floor *obj-h* 2))
 
+;;
 (defparameter *tate* 20)
 (defparameter *yoko* 30)
 
+;;画面サイズ
 (defparameter +screen-w+ (* *obj-w* *yoko*))
 (defparameter +screen-h+ (* *obj-h* *tate*))
 
@@ -35,11 +39,11 @@
 ;; a:クリボー b:ノコノコ
 ;; z:入れる土管 y:ゴール
 (defparameter *obj-type-list*
-  `(1 (,*brown* :hard-block) 2 (,*brown2* :soft-block) 3 (,*green* :dokan)
-    4 (,*yellow* :1coin) 5 (,*yellow* :item) 6 (,*yellow* :star)
-    7 (,*yellow* :1up) 8 (,*light-blue* :hide-1up) 9 (,*yellow* :10coin)
-    a (,*kuribo* :kuribo) b (,*nokonoko* :nokonoko)
-    y (,*flag* :goal) z (,*green* :enter-dokan)))
+  `(1 (,*brown*  :hard-block) 2 (,*brown2*     :soft-block)   3 (,*green*  :dokan)
+    4 (,*yellow* :1coin)      5 (,*yellow*     :item)         6 (,*yellow* :star)
+    7 (,*yellow* :1up)        8 (,*light-blue* :hide-1up)     9 (,*yellow* :10coin)
+    a (,*kuribo* :kuribo)     b (,*nokonoko*   :nokonoko)
+    y (,*flag*   :goal)       z (,*green*      :enter-dokan)))
 
 (defparameter *stroke-paint* (gamekit:vec4 0 0 0 1))
 (defparameter *background-pos* (gamekit:vec2 0 0))
@@ -59,6 +63,10 @@
      :accessor right
      :initform nil
      :initarg :right)
+   (down
+     :accessor down
+     :initform nil
+     :initarg :down)
    (x
      :accessor x
      :initform nil
@@ -73,7 +81,7 @@
     :accessor color
     :initform nil
     :initarg :color)
-   (obj-type
+   (obj-type ;; objの種類
     :accessor obj-type
     :initform 0
     :initarg :obj-type)
@@ -135,7 +143,7 @@
     :accessor fall
     :initform nil
     :initarg :fall)
-   (state ;;キャラの状態 or アイテムの種類
+   (state ;;プレイヤー:今の状態 (:small :big :fire) 他obj:動いているかどうか
     :accessor state
     :initform :small
     :initarg :state)
@@ -165,10 +173,18 @@
     :accessor scroll
     :initform 0
     :initarg :scroll)
+   (fire
+    :accessor fire
+    :initform nil
+    :initarg :fire)
    (muteki-time
     :accessor muteki-time
     :initform 0
     :initarg :muteki-time)
+   (fire-time
+    :accessor fire-time
+    :initform 0
+    :initarg :fire-time)
    (move-obj ;;ステージ上に出現したアイテムとか敵
     :accessor move-obj
     :initform nil
@@ -206,7 +222,7 @@
 				  (make-instance 'obj :pos obj-pos :x obj-x :x2 obj-x2
 						      :y obj-y :y2 obj-y2
 						      :width *obj-w* :height *obj-h*
-						      :color color
+						      :color color 
 						      :obj-type name)
 				  obj-list))
 				(t
@@ -217,7 +233,7 @@
 							:y obj-y :y2 obj-y2
 							:width *obj-w* :height *obj-h*
 							:vx -1 :vy 0 :fall nil :jump nil
-							:color color
+							:color color :state nil
 							:obj-type name)
 				  move-obj))))))))
       (make-array (length obj-list) :initial-contents obj-list))))
@@ -225,21 +241,25 @@
 (defun init-data ()
   (setf *p* (make-instance 'player :pos (gamekit:vec2 0 64) :lastpos (gamekit:vec2 0 64)
 				   :x 0 :x2 *obj-w* :y 64 :y2 (+ 64 *obj-h*)
-				   :width *obj-w* :height *obj-h*
+				   :width *obj-w* :height *obj-h* :color *red*
 				   :vx 2 :vy 0)
         *field* (create-field *stage1-1* *p*)))
 
 ;;キー入力
 (defun input-key ()
-  (with-slots (left right z x) *keystate*
+  (with-slots (left right down z x) *keystate*
     (gamekit:bind-button :left :pressed
       (lambda () (setf left t)))
     (gamekit:bind-button :left :released
       (lambda () (setf left nil)))
     (gamekit:bind-button :right :pressed
-      (lambda () (setf right t)))
+			 (lambda () (setf right t)))
     (gamekit:bind-button :right :released
-      (lambda () (setf right nil)))
+			 (lambda () (setf right nil)))
+    (gamekit:bind-button :down :pressed
+			 (lambda () (setf down t)))
+    (gamekit:bind-button :down :released
+			 (lambda () (setf down nil)))
     (gamekit:bind-button :z :pressed
       (lambda () (setf z t)))
     (gamekit:bind-button :z :released
@@ -269,27 +289,40 @@
 
 ;;プレイヤー描画
 (defun draw-player ()
-  (with-slots (pos x y scroll width height muteki-time) *p*
+  (with-slots (pos x y scroll width height muteki-time color) *p*
     (let ((new-pos (gamekit:vec2 (- x scroll) y)))
       (if (> muteki-time 0)
 	  (when (not (zerop (mod muteki-time 5)))
-	    (gamekit:draw-rect new-pos width height :fill-paint *red*))
-	  (gamekit:draw-rect new-pos width height :fill-paint *red*)))))
+	    (gamekit:draw-rect new-pos width height :fill-paint color))
+	  (gamekit:draw-rect new-pos width height :fill-paint color)))))
 
 ;;アイテムとか敵描画
 (defun draw-move-obj ()
   (with-slots (move-obj scroll) *p*
     (dolist (obj move-obj)
-      (with-slots (pos x y color width height) obj
-        (let ((new-pos (gamekit:vec2 (- x scroll) y)))
-          (gamekit:draw-rect new-pos width height :fill-paint color
-						  :stroke-paint *stroke-paint*))))))
+      (with-slots (pos x x2 y color width height) obj
+	(when (and (>= x2 scroll) ;;画面範囲内かどうか
+		   (>= (+ scroll +screen-w+) x))
+	  (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+	    (gamekit:draw-rect new-pos width height :fill-paint color
+						    :stroke-paint *stroke-paint*)))))))
 
+;;ファイアー
+(defun draw-fire ()
+  (with-slots (fire scroll) *p*
+    (dolist (f fire)
+      (with-slots (x y width color) f
+	(when (and (>= (+ x 10) scroll) ;;画面範囲内かどうか
+		   (>= (+ scroll +screen-w+) x))
+	  (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+	    (gamekit:draw-circle new-pos width :fill-paint color
+					       :stroke-paint *stroke-paint*)))))))
+  
 ;;座標を表示するよ
 (defun draw-debug ()
   (with-slots (left right z) *keystate*
     (with-slots (pos vx vy x y lastpos muteki-time) *p*
-      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d muteki:~d" x y vx vy muteki-time)
+      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d muteki:~d" x y vx vy muteki-time )
                           (gamekit:vec2 100 300)))))
     ;;(gamekit:draw-text (format nil " left    :~:[ no ~; yes ~] " left) (gamekit:vec2 100 100))
     ;;(gamekit:draw-text (format nil " right    :~:[ no ~; yes ~] " right) (gamekit:vec2 100 200))
@@ -323,29 +356,48 @@
 
 ;;敵とアイテムが動くよ
 (defun update-move-obj ()
-  (with-slots (move-obj) *p*
+  (with-slots (move-obj scroll) *p*
     (dolist (obj move-obj)
-      (with-slots (obj-type) obj
-	(case obj-type
-	  ((:kuribo :nokonoko :kinoko)
-	   (kuribo-move obj)))))))
+      (with-slots (x x2 obj-type state) obj
+	(when (and (>= x2 scroll) ;;画面範囲内かどうか
+		   (>= (+ scroll +screen-w+) x)
+		   (null state)) ;;画面内に入るまで待機させておく 
+	  ;;一度画面内に入ったら動き続ける
+	  (setf state :move))
+	(when (eq state :move)
+	  (case obj-type
+	    ((:kuribo :nokonoko :kinoko)
+	     (kuribo-move obj))))))))
 	     
 
 
 ;;プレーヤーが動くよ🧢👨
 (defun update-player ()
-  (with-slots (pos x x2 y y2 vx vy lastpos jump fall scroll width height muteki-time state) *p*
+  (with-slots (pos x x2 y y2 vx vy lastpos jump fall scroll width height muteki-time fire-time state fire) *p*
     (setf (gamekit:x lastpos) x)
     (when (left *keystate*)
       (decf x vx))
     (when (right *keystate*)
       (incf x vx))
+    (if (down *keystate*)
+	(when (not (eq state :small))
+	  (setf height *obj-h*
+		y2 (+ y height)))
+	(when (not (eq state :small))
+	  (setf height (* *obj-h* 2)
+		y2 (+ y height))))
     (if (and (x *keystate*) (null jump) (null fall))
 	(setf jump t
 	      vy 18)
 	(when (or jump fall)
 	  (setf vy -1)))
-    (when (z *keystate*))
+    (when (z *keystate*)
+      (when (and (eq state :fire)
+		 (= fire-time 0))
+	(push (make-instance 'chara :vx 1 :vy 1 :color *red*
+				    :x (+ x2 10) :y (- y2 10) :width 10) ;; width=radius
+	      fire)
+	(setf fire-time 50)))
     ;;プレイヤーのy座標更新
     (let ((temp y))
       (incf y (+ (- y (gamekit:y lastpos)) vy))
@@ -354,6 +406,8 @@
 	    y2 (+ y height)))
     (when (> muteki-time 0)
       (decf muteki-time))
+    (when (> fire-time 0)
+      (decf fire-time))
     (when (> 0 y)
       (setf state :dead))
     (when (eq state :dead)
@@ -416,23 +470,24 @@
     (with-slots (state move-obj) *p*
       (case obj-type
 	(:soft-block ;;壊れるブロック
-	 (setf *field* (remove obj *field* :test #'equal)))
+	 (when (not (eq state :small))
+	   (setf *field* (remove obj *field* :test #'equal))))
 	(:item ;;アイテムが出るハテナブロック
 	 (setf obj-type :hard-block
 	       color *brown*)
 	 (case state ;;プレイヤーの状態で出るアイテム変わる
-	   (:small (push (make-instance 'chara :vx 1 :vy 0 :state :kinoko :color *kinoko* :fall nil
+	   (:small (push (make-instance 'chara :vx 1 :vy 0 :color *kinoko* :fall nil
 					       :width *obj-w* :height *obj-h*
 					       :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*) 
 					       :pos (gamekit:vec2 x y2)
-					       :obj-type :kinoko
+					       :obj-type :kinoko :state nil
 					       :lastpos (gamekit:vec2 x y2))
 			 move-obj))
-	   (:big (push (make-instance 'chara :vx 0 :vy 0 :state :flower :color *flower* :fall nil
+	   (:big (push (make-instance 'chara :vx 0 :vy 0 :color *flower* :fall nil
 					     :width *obj-w* :height *obj-h*
 					     :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*) 
 					     :pos (gamekit:vec2 x y2)
-					     :obj-type :flower
+					     :obj-type :flower :state nil
 					     :lastpos (gamekit:vec2 x y2))
 		       move-obj))))))))
 
@@ -441,7 +496,7 @@
 
 ;;出現してるアイテムとプレイヤーの当たり判定
 (defun hit-player-move-obj ()
-  (with-slots (move-obj state height muteki-time d-hit vy jump fall) *p*
+  (with-slots (move-obj state height muteki-time d-hit vy jump fall y y2 color) *p*
     (dolist (obj move-obj)
       (let ((hit-dir (obj-hit-p *p* obj)))
 	(when hit-dir
@@ -456,12 +511,17 @@
 		    (setf state :dead))
 		   ((not (eq state :small))
 		    (setf state :small
+			  color *red*
 			  muteki-time 100
 			  height *obj-h*)))))
 	    (:kinoko (setf state :big
 			   height (* *obj-h* 2)
+			   y2 (+ y height)
 			   move-obj (remove obj move-obj :test #'equalp)))
 	    (:flower (setf state :fire
+			   height (* *obj-h* 2)
+			   y2 (+ y height)
+			   color *flower*
 			   move-obj (remove obj move-obj :test #'equalp)))
 	    (:star   (setf state :muteki
 			   move-obj (remove obj move-obj :test #'equalp)))))))))
@@ -542,6 +602,7 @@
   (draw-field)
   (draw-player)
   (draw-move-obj)
+  (draw-fire)
   (draw-debug)
   (draw-console))
 
