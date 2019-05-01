@@ -1,5 +1,5 @@
 ;;もげお by もげぞうβ
-;;TODO アイテムとobjの当たり判定
+;;TODO ノコノコ踏んだら甲羅（ボール）のこしたい
 ;;
 (ql:quickload :trivial-gamekit)
 
@@ -55,140 +55,53 @@
 
 
 (defclass keystate ()
-  ((left
-    :accessor left
-     :initform nil
-     :initarg :left)
-   (right
-     :accessor right
-     :initform nil
-     :initarg :right)
-   (down
-     :accessor down
-     :initform nil
-     :initarg :down)
-   (x
-     :accessor x
-     :initform nil
-     :initarg :x)
-   (z
-     :accessor z
-     :initform nil
-     :initarg :z)))
+  ((left :accessor left :initform nil :initarg :left)
+   (right :accessor right :initform nil :initarg :right)
+   (down :accessor down :initform nil :initarg :down)
+   (x :accessor x :initform nil :initarg :x)
+   (z :accessor z :initform nil :initarg :z)))
 
-(defclass obj ()
-  ((color
-    :accessor color
-    :initform nil
-    :initarg :color)
-   (obj-type ;; objの種類
-    :accessor obj-type
-    :initform 0
-    :initarg :obj-type)
-   (pos
-    :accessor pos
-    :initform (gamekit:vec2 0 0) ;; x y
-    :initarg :pos)
-   (x
-    :accessor x
-    :initform 0
-    :initarg :x)
-   (x2
-    :accessor x2
-    :initform 0
-    :initarg :x2)
-   (y
-    :accessor y
-    :initform 0
-    :initarg :y)
-   (y2
-    :accessor y2
-    :initform 0
-    :initarg :y2)
-   (width
-    :accessor width
-    :initform *obj-w*
-    :initarg :width)
-   (height
-    :accessor height
-    :initform *obj-h*
-    :initarg :height)))
+(defclass nanka ()
+  ((color :accessor color :initform nil :initarg :color)
+   (obj-type :accessor obj-type :initform 0 :initarg :obj-type)
+   (u-hit :accessor u-hit :initform nil :initarg :u-hit) ;;上部当たり判定フラグかつ当たったobjを入れる
+   (d-hit :accessor d-hit :initform nil :initarg :d-hit) ;;下部当たり判定フラグ
+   (r-hit :accessor r-hit :initform nil :initarg :r-hit) ;;右部当たり判定フラグ
+   (l-hit :accessor l-hit :initform nil :initarg :l-hit))) ;左部当たり判定フラグ
+
+(defclass ball (nanka)
+  ((px :accessor px :initform 0 :initarg :px)
+   (py :accessor py :initform 0 :initarg :py)
+   (lastpy :accessor lastpy :initform 0 :initarg :lastpy)
+   (vx :accessor vx :initform 0 :initarg :vx)
+   (vy :accessor vy :initform 0 :initarg :vy)
+   (r :accessor r :initform 0 :initarg :r)))
+
+(defclass obj (nanka)
+  ((pos :accessor pos :initform (gamekit:vec2 0 0) :initarg :pos)
+   (x :accessor x :initform 0 :initarg :x)
+   (x2 :accessor x2 :initform 0 :initarg :x2)
+   (y :accessor y :initform 0 :initarg :y)
+   (y2 :accessor y2 :initform 0 :initarg :y2)
+   (width :accessor width :initform *obj-w* :initarg :width)
+   (height :accessor height :initform *obj-h* :initarg :height)))
 
 (defclass chara (obj)
-  ((ax
-    :accessor ax
-    :initform 0
-    :initarg :ax)
-   (ay
-    :accessor ay
-    :initform 0
-    :initarg :ay)
-   (vx
-    :accessor vx
-    :initform 0
-    :initarg :vx)
-   (vy
-    :accessor vy
-    :initform 0
-    :initarg :vy)
-   (lastpos
-    :accessor lastpos
-    :initform (gamekit:vec2 0 0)
-    :initarg :lastpos)
-   (jump
-    :accessor jump
-    :initform nil
-    :initarg :jump)
-   (fall ;;落下
-    :accessor fall
-    :initform nil
-    :initarg :fall)
-   (state ;;プレイヤー:今の状態 (:small :big :fire) 他obj:動いているかどうか
-    :accessor state
-    :initform :small
-    :initarg :state)
-   (u-hit ;;上部当たり判定フラグかつ当たったobjを入れる
-    :accessor u-hit
-    :initform nil
-    :initarg :u-hit)
-   (d-hit ;;下部当たり判定フラグ
-    :accessor d-hit
-    :initform nil
-    :initarg :d-hit)
-   (r-hit ;;右部当たり判定フラグ
-    :accessor r-hit
-    :initform nil
-    :initarg :r-hit)
-   (l-hit ;;左部当たり判定フラグ
-    :accessor l-hit
-    :initform nil
-    :initarg :l-hit)))
+  ((vx :accessor vx :initform 0 :initarg :vx)
+   (vy :accessor vy :initform 0 :initarg :vy)
+   (lastpos :accessor lastpos :initform (gamekit:vec2 0 0) :initarg :lastpos)
+   (jump :accessor jump :initform nil :initarg :jump)
+   (fall :accessor fall :initform nil :initarg :fall)
+   (state :accessor state :initform :small :initarg :state))) ;;プレイヤー:今の状態 (:small :big :fire) 他obj:動いているかどうか
+   
 
 (defclass player (chara)
-  ((field-w-max
-   :accessor field-w-max
-   :initform 0
-   :initarg :field-w-max)
-   (scroll
-    :accessor scroll
-    :initform 0
-    :initarg :scroll)
-   (fire
-    :accessor fire
-    :initform nil
-    :initarg :fire)
-   (muteki-time
-    :accessor muteki-time
-    :initform 0
-    :initarg :muteki-time)
-   (fire-time
-    :accessor fire-time
-    :initform 0
-    :initarg :fire-time)
-   (move-obj ;;ステージ上に出現したアイテムとか敵
-    :accessor move-obj
-    :initform nil
-    :initarg :move-obj)))
+  ((field-w-max :accessor field-w-max :initform 0 :initarg :field-w-max)
+   (scroll :accessor scroll :initform 0 :initarg :scroll)
+   (fire :accessor fire :initform nil :initarg :fire)
+   (muteki-time :accessor muteki-time :initform 0 :initarg :muteki-time)
+   (fire-time :accessor fire-time :initform 0 :initarg :fire-time)
+   (move-obj :accessor move-obj :initform nil :initarg :move-obj)));;ステージ上に出現したアイテムとか敵
 
 (gamekit:defgame mogeo () ()
   (:viewport-width +screen-w+)
@@ -300,23 +213,32 @@
 (defun draw-move-obj ()
   (with-slots (move-obj scroll) *p*
     (dolist (obj move-obj)
-      (with-slots (pos x x2 y color width height) obj
-	(when (and (>= x2 scroll) ;;画面範囲内かどうか
-		   (>= (+ scroll +screen-w+) x))
-	  (let ((new-pos (gamekit:vec2 (- x scroll) y)))
-	    (gamekit:draw-rect new-pos width height :fill-paint color
-						    :stroke-paint *stroke-paint*)))))))
+      (case (type-of obj)
+	(chara
+	 (with-slots (pos x x2 y color width height) obj
+	   (when (and (>= x2 scroll) ;;画面範囲内かどうか
+		      (>= (+ scroll +screen-w+) x))
+	     (let ((new-pos (gamekit:vec2 (- x scroll) y)))
+	       (gamekit:draw-rect new-pos width height :fill-paint color
+						       :stroke-paint *stroke-paint*)))))
+	(ball
+	 (with-slots (px py r color) obj
+	   (when (and (>= (+ px 10) scroll) ;;画面範囲内かどうか
+		      (>= (+ scroll +screen-w+) px))
+	     (let ((new-pos (gamekit:vec2 (- px scroll) py)))
+	       (gamekit:draw-circle new-pos r :fill-paint color
+					      :stroke-paint *stroke-paint*)))))))))
 
 ;;ファイアー
 (defun draw-fire ()
   (with-slots (fire scroll) *p*
     (dolist (f fire)
-      (with-slots (x y width color) f
-	(when (and (>= (+ x 10) scroll) ;;画面範囲内かどうか
-		   (>= (+ scroll +screen-w+) x))
-	  (let ((new-pos (gamekit:vec2 (- x scroll) y)))
-	    (gamekit:draw-circle new-pos width :fill-paint color
-					       :stroke-paint *stroke-paint*)))))))
+      (with-slots (px py r color) f
+	(when (and (>= (+ px 10) scroll) ;;画面範囲内かどうか
+		   (>= (+ scroll +screen-w+) px))
+	  (let ((new-pos (gamekit:vec2 (- px scroll) py)))
+	    (gamekit:draw-circle new-pos r :fill-paint color
+					   :stroke-paint *stroke-paint*)))))))
   
 ;;座標を表示するよ
 (defun draw-debug ()
@@ -368,7 +290,25 @@
 	  (case obj-type
 	    ((:kuribo :nokonoko :kinoko)
 	     (kuribo-move obj))))))))
-	     
+
+
+;;ファイア動くよ
+(defun update-fire ()
+  (with-slots (fire scroll) *p*
+    (dolist (f fire)
+      (with-slots (px py vx vy r lastpy) f
+	(cond
+	  ((and (>= (+ px r) scroll) ;;画面範囲内かどうか
+		(>= (+ scroll +screen-w+) (- px r)))
+	   (incf px vx)
+	   ;;(when (> vy 0)
+	     ;;(debug-format (format nil "vy ~d" vy))
+	   (let ((temp py)) ;;y方向
+	     (incf py (+ (- py lastpy) vy))
+	     (setf lastpy temp)))
+	  (t
+	   (setf fire (remove f fire :test #'equal))))))))
+	
 
 
 ;;プレーヤーが動くよ🧢👨
@@ -391,11 +331,12 @@
 	      vy 18)
 	(when (or jump fall)
 	  (setf vy -1)))
-    (when (z *keystate*)
+    (when (z *keystate*) ;;ファイアー
       (when (and (eq state :fire)
 		 (= fire-time 0))
-	(push (make-instance 'chara :vx 1 :vy 1 :color *red*
-				    :x (+ x2 10) :y (- y2 10) :width 10) ;; width=radius
+	(push (make-instance 'ball :vx 2 :vy 0 :color *red*
+				   :px (+ x2 10) :py (- y2 10) :lastpy (- y2 10)
+				   :r 10) ;; width=radius
 	      fire)
 	(setf fire-time 50)))
     ;;プレイヤーのy座標更新
@@ -425,12 +366,43 @@
 		(< p-center (+ scroll +screen-center-x+)))
 	(setf scroll (max 0 (- p-center +screen-center-x+)))))))
 
+;;マルと四角の当たり判定
+(defun maru-rect-hit-p (maru rectan)
+  (with-slots (r px py vx vy lastpy) maru
+    (with-slots (x x2 y y2) rectan
+      (let* ((b1x (- x r)) (b2x (+ x2 r))
+	     (b1y (- y r)) (b2y (+ y2 r)))
+	(cond
+	  ;;ボールの下部とブロックの上部にあたった
+	  ((or (>= r (sqrt (+ (expt (- px x) 2) (expt (- py y2) 2))))
+	       (>= r (sqrt (+ (expt (- px x2) 2) (expt (- py y2) 2))))
+	       (and (>= x2 px x) (> lastpy y2)
+		    (>= b2y py y)))
+	   (debug-format "moge")
+	   :bot-hit)
+	  ;;ボールの上部とブロックの下部にあたった
+	  ((and (>= x2 px x) (< lastpy y)
+		(>= y py b1y))
+	   :top-hit)
+	  ;;ボールの左とブロックの右にあたった
+	  ((and (>= b2x px x2) (> 0 vx)
+		(>= y2 py y))
+	   (debug-format "left")
+	   :left-hit)
+	  ;;ボールの右とブロックの左にあたった
+	  ((and (>= x2 px b1x) (> vx 0)
+		(>= y2 py y))
+	   (debug-format "right")
+	   :right-hit)
+	  ;;当たらなかった
+	  (t nil))))))
+
 ;;obj1とobj2の当たり判定の判定
 (defun obj-hit-p (obj1 obj2)
   (with-slots (u-hit d-hit r-hit l-hit) obj1
     (let* ((obj1-x (x obj1)) (obj1-x2 (x2 obj1))
 	   (obj1-y (y obj1)) (obj1-y2 (y2 obj1))
-	   (obj1-center (+ obj1-x *obj-w/2*))
+	   ;;(obj1-center (+ obj1-x *obj-w/2*))
 	   (obj2-x (x obj2)) (obj2-x2 (x2 obj2))
 	   (obj2-y (y obj2)) (obj2-y2 (y2 obj2)))
       (cond
@@ -491,7 +463,18 @@
 					     :lastpos (gamekit:vec2 x y2))
 		       move-obj))))))))
 
-;;出現してるアイテムと障害物の当たり判定
+;;ファイアーと敵の当たり判定
+(defun hit-fire-move-obj ()
+  (with-slots (fire move-obj) *p*
+    (dolist (f fire)
+      (dolist (mobj move-obj)
+	(with-slots (obj-type) mobj
+	  (case obj-type
+	    ((:kuribo :nokonoko)
+	     (when (maru-rect-hit-p f mobj)
+	       (setf fire (remove f fire :test #'equal)
+		     move-obj (remove mobj move-obj :test #'equal))
+	       (return)))))))))
 
 
 ;;出現してるアイテムとプレイヤーの当たり判定
@@ -503,8 +486,13 @@
 	  (case (obj-type obj)
 	    ((:kuribo :nokonoko)
 	     (if (eq hit-dir :bot-hit) ;;踏んづけてたら
-		 (setf move-obj (remove obj move-obj :test #'equal)
-		       d-hit obj)
+		 (progn
+		   (setf move-obj (remove obj move-obj :test #'equal)
+			 d-hit obj))
+		   ;; (when (eq (obj-type obj) :nokonoko)
+		   ;;   (push (make-instance 'ball :vx 0 :vy 0 :px (+ (x obj) 16) :py (+ (y obj) 16)
+		   ;; 				:r 16 :color *nokonoko*)
+		   ;; 	   move-obj)))
 		 (cond
 		   ((and (= muteki-time 0)
 			 (eq state :small))
@@ -535,20 +523,48 @@
       (:left-hit (setf l-hit obj2))
       (:right-hit (setf r-hit obj2)))))
 
+;;ファイアとobjぶつかってたらobjを保存
+(defun set-fire-hit-obj (fire obj)
+  (with-slots (x x2 y y2) obj
+    (dolist (f fire)
+      (with-slots (d-hit u-hit l-hit r-hit) f
+	(case (maru-rect-hit-p f obj)
+	  (:bot-hit   (setf d-hit obj))
+	  (:top-hit   (setf u-hit obj))
+	  (:left-hit  (setf l-hit obj))
+	  (:right-hit (setf r-hit obj)))))))
+
+;;ファイアーボールの位置補正と速度変更
+(defun fire-position-hosei ()
+  (with-slots (fire) *p*
+  (dolist (f fire)
+    (with-slots (px py lastpy vx vy u-hit d-hit l-hit r-hit r) f
+      (when u-hit
+	(setf vy -1 py (- (y u-hit) r) lastpy (- (y u-hit) r)))
+      (when (and l-hit (null d-hit))
+	(setf fire (remove f fire :test #'equalp)))
+      (when (and r-hit (null d-hit))
+	(setf fire (remove f fire :test #'equalp)))
+      (when d-hit
+	(setf vy 7 py (+ (y2 d-hit) r) lastpy (+ (y2 d-hit) r)))
+      (when (null d-hit)
+	(setf vy -0.5))
+      (setf u-hit nil d-hit nil l-hit nil r-hit nil)))))
+
 ;;動くobjの位置補正
 (defun position-hosei (obj)
   (with-slots (x x2 y y2 height width vy vx lastpos u-hit d-hit l-hit r-hit fall jump) obj
-    (when u-hit
+    (when u-hit ;; u-hit=ぶつかったオブジェクト
       (setf y (- (y u-hit) height)
 	    (gamekit:y lastpos) (- (y u-hit) height))
       (when (eq (type-of obj) 'player) ;;プレイヤーの上部とブロックの下部があたったら
-	 (hit-player-block u-hit)))
+	(hit-player-block u-hit)))
     (when (and l-hit
 	       (or (and d-hit (null fall))
 		   (and fall (null d-hit))))
       (setf (gamekit:x lastpos) (x2 l-hit)
 	    x (x2 l-hit))
-      (when (eq (type-of obj) 'chara) ;;プレイヤー以外
+      (when (eq (type-of obj) 'chara) ;;プレイヤー以外だったらvxの向きかえる
 	(when (> 0 vx)
 	  (setf vx (- vx)))))
     (when (and r-hit
@@ -575,15 +591,17 @@
   
 ;;プレイヤーとかの当たり判定 (アイテム 敵 障害物)
 (defun hit-player-objects ()
-  (with-slots (scroll vy jump fall move-obj state width height) *p*
+  (with-slots (scroll vy jump fall move-obj state width height fire) *p*
     (hit-player-move-obj) ;;プレイヤーとアイテムや敵の当たり判定
     ;;動くobjと動かないobjとの当たり判定
     (loop :for obj across *field*
 	  :for i from 0
 	  :do (set-hit-obj *p* obj)
-	      (dolist (mobj move-obj)
+	      (set-fire-hit-obj fire obj)
+	      (dolist (mobj move-obj) 
 		(set-hit-obj mobj obj)))
-    (position-hosei *p*)
+    (position-hosei *p*) ;;プレイヤーのポジション補正
+    (fire-position-hosei)
     (dolist (mobj move-obj)
       (position-hosei mobj))))
 ;; 🐈🐈🐈🐈
@@ -592,8 +610,10 @@
 (defmethod gamekit:act ((app mogeo))
   (update-player)
   (update-move-obj)
+  (update-fire)
   (update-scroll)
   (hit-player-objects)
+  (hit-fire-move-obj)
   (sleep 0.01))
 
 ;;描画
