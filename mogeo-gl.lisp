@@ -139,7 +139,7 @@
                                    (color (car hoge)) (name (cadr hoge)))
                              (cond
                               ((or (integerp obj-type)
-                                   (eq 'y obj-type))
+                                   (eq 'y obj-type) (eq 'z obj-type))
                                (push
                                     (make-instance 'obj :pos obj-pos :x obj-x :x2 obj-x2
                                                    :y obj-y :y2 obj-y2
@@ -287,19 +287,23 @@
             y2 (+ y height)))))
 
 ;;敵とアイテムが動くよ
-(defun update-move-obj (objs scroll)
-  (dolist (obj objs)
-    (with-slots (x x2 obj-type state) obj
-      (when (and (>= x2 scroll) ;;画面範囲内かどうか
-             (>= (+ scroll +screen-w+) x)
-             (null state)) ;;画面内に入るまで待機させておく
-  ;;一度画面内に入ったら動き続ける
-       (setf state :move))
-      (when (eq state :move)
-       (case obj-type
-         ((:kuribo :nokonoko :kinoko :koura)
-          (kuribo-move obj)))))))
+(defun update-move-obj (scroll slot-name)
+  (dolist (obj (slot-value *p* slot-name))
+    (with-slots (x x2 y obj-type state) obj
+      (when (and (null state)
+                 (>= x2 scroll) (>= (+ scroll +screen-w+) x) (>= +screen-h+ y 0)) ;;画面範囲内かどうか
+        ;;一度画面内に入ったら動かす
+        (setf state :move))
+      (when state ;;画面内に入るまで待機させておく
+        (kuribo-move obj)
+        (when (> 0 y) ;;画面下に落ちたら消す
+          (setf (slot-value *p* slot-name) (remove obj (slot-value *p* slot-name) :test #'equal)))))))
 
+(defun update-all-move-obj ()
+  (with-slots (enemies items koura scroll) *p*
+    (update-move-obj scroll 'enemies)
+    (update-move-obj scroll 'items)
+    (update-move-obj scroll 'koura)))
 
 ;;ファイア動くよ
 (defun update-fire ()
@@ -308,10 +312,9 @@
       (with-slots (x x2 y y2 lasty width height vx vy) f
        (cond
           ((and (>= x2 scroll) ;;画面範囲内かどうか
-                (>= (+ scroll +screen-w+) x))
-           (incf x vx)
-     ;;(when (> vy 0)
-       ;;(debug-format (format nil "vy ~d" vy))
+                (>= (+ scroll +screen-w+) x)
+                (>= +screen-h+ y 0))
+           (incf x vx) ;;x方向
            (let ((temp y)) ;;y方向
              (incf y (+ (- y lasty) vy))
              (setf lasty temp
@@ -345,7 +348,7 @@
         (push (make-instance 'chara :vx 3 :vy 0 :color *red*
                              :x x2 :x2 (+ x *fire-2r*) :y (- y2 *fire-2r*) :y2 y2
                              :lasty (- y2 *fire-2r*) :width *fire-2r* :height *fire-2r*
-                             :r *fire-r*
+                             :r *fire-r* :state nil
                              :obj-type :fire)
               fire)
         (setf fire-time 50)))
@@ -493,8 +496,14 @@
     (dolist (k koura)
       (when (/= (vx k) 0)
         (dolist (enemy enemies)
-          (when (obj-hit-p k enemy)
-            (setf enemies (remove enemy enemies :test #'equal))))))))
+          (with-slots (state vy) enemy
+            (when (and (obj-hit-p k enemy) (not (eq state :dead)))
+              (setf state :dead ;;死んだ
+                    vy 12) ;;ちょっとジャンプさせる
+              (if (> (vx k) 0)
+                  (setf (vx enemy) (abs (vx enemy)))
+                  (setf (vx enemy) (- (abs (vx enemy))))))))))))
+            ;;(setf enemies (remove enemy enemies :test #'equal))))))))
 
 
 
@@ -545,10 +554,9 @@
             ((and (/= vx 0) (eq dir :bot-hit)) ;;甲羅が動いているときにプレイヤーが踏んづける
              (setf vx 0 ;;甲羅のvx
                    d-hit k))
-            ((and (/= vx 0) dir)
+            ((and (/= vx 0) dir (= muteki-time 0))
              (cond
-               ((and (= muteki-time 0) ;;無敵ではなくチビ状態だったら死亡
-                     (eq state :small))
+               ((eq state :small)
                 (setf state :dead))
                ((not (eq state :small)) ;;チビ以外のときはチビ状態にして無敵状態にする
                 (setf state :small
@@ -577,15 +585,16 @@
 
 ;;obj1とobj2がぶつかってたらobj2を保存
 (defun set-hit-obj (obj1 obj2)
-  (with-slots (u-hit d-hit r-hit l-hit obj-type) obj1
-    (let ((hantei (if (eq obj-type :fire) ;;obj1がファイアーボールか四角か
-                      (fire-rect-hit-p obj1 obj2)
-                      (obj-hit-p obj1 obj2))))
-      (case hantei
-        (:bot-hit (setf d-hit obj2))
-        (:top-hit (setf u-hit obj2))
-        (:left-hit (setf l-hit obj2))
-        (:right-hit (setf r-hit obj2))))))
+  (with-slots (u-hit d-hit r-hit l-hit obj-type state) obj1
+    (when (not (eq state :dead))
+      (let ((hantei (if (eq obj-type :fire) ;;obj1がファイアーボールか四角か
+                        (fire-rect-hit-p obj1 obj2)
+                        (obj-hit-p obj1 obj2))))
+        (case hantei
+          (:bot-hit (setf d-hit obj2))
+          (:top-hit (setf u-hit obj2))
+          (:left-hit (setf l-hit obj2))
+          (:right-hit (setf r-hit obj2)))))))
 
 
 ;;objsとobj2の当たり判定
@@ -622,7 +631,7 @@
 
 ;;動くobjの位置補正
 (defun position-hosei (obj)
-  (with-slots (x x2 y y2 height width vy vx lasty u-hit d-hit l-hit r-hit) obj
+  (with-slots (x x2 y y2 height width vy vx lasty u-hit d-hit l-hit r-hit state) obj
     (when u-hit ;; u-hit=ぶつかったオブジェクト
       (setf y (- (y u-hit) height)
             vy -1
@@ -686,10 +695,8 @@
 ;;ゲームループ？
 (defmethod gamekit:act ((app mogeo))
   (update-player)
-  (update-move-obj (enemies *p*) (scroll *p*))
-  (update-move-obj (items *p*) (scroll *p*))
-  (update-move-obj (koura *p*) (scroll *p*))
-  (update-fire)
+  (update-all-move-obj)
+  ;;(update-fire)
   (update-scroll)
   (hit-player-objects)
   (hit-fire-enemies)
