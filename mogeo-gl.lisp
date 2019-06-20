@@ -18,8 +18,11 @@
 
 (defparameter *fire-r* 10)
 (defparameter *fire-2r* (* *fire-r* 2))
+(defparameter *fire-vx* 3)
 (defparameter *koura-r* 16)
 (defparameter *koura-2r* (* *koura-r* 2))
+
+(defparameter *jump-power* 16)
 
 ;;画面サイズ
 (defparameter +screen-w+ (* *obj-w* *yoko*))
@@ -95,6 +98,7 @@
 (defclass chara (obj)
   ((vx      :accessor vx      :initform 0      :initarg :vx)      ;;x方向スピード
    (vy      :accessor vy      :initform 0      :initarg :vy)      ;;y方向スピード
+   (dir     :accessor dor     :initform :right :initarg :dir)     ;;向き
    (lasty   :accessor lastt   :initform 0      :initarg :lasty)   ;;一個前のy
    (jump    :accessor jump    :initform nil    :initarg :jump)    ;;ジャンプ中フラグ
    (fall    :accessor fall    :initform nil    :initarg :fall)    ;;落下中フラグ
@@ -141,23 +145,23 @@
                               ((or (integerp obj-type)
                                    (eq 'y obj-type) (eq 'z obj-type))
                                (push
-                                    (make-instance 'obj :pos obj-pos :x obj-x :x2 obj-x2
-                                                   :y obj-y :y2 obj-y2
-                                                   :width *obj-w* :height *obj-h*
-                                                   :color color
-                                                   :obj-type name)
-                                    obj-list))
+				(make-instance 'obj :pos obj-pos :x obj-x :x2 obj-x2
+						    :y obj-y :y2 obj-y2
+						    :width *obj-w* :height *obj-h*
+						    :color color
+						    :obj-type name)
+				obj-list))
                               (t
-                                   (push
-                                        (make-instance 'chara :pos (gamekit:vec2 obj-x obj-y)
-                                                :lasty obj-y
-                                                :x obj-x :x2 obj-x2
-                                                :y obj-y :y2 obj-y2
-                                                :width *obj-w* :height *obj-h*
-                                                :vx -1 :vy 0 :fall nil :jump nil
-                                                :color color :state nil
-                                                :obj-type name)
-                                        enemies))))))))
+			       (push
+				(make-instance 'chara :pos (gamekit:vec2 obj-x obj-y)
+						      :lasty obj-y
+						      :x obj-x :x2 obj-x2
+						      :y obj-y :y2 obj-y2
+						      :width *obj-w* :height *obj-h*
+						      :vx -1 :vy 0 :fall nil :jump nil
+						      :color color :state nil
+						      :obj-type name)
+				enemies))))))))
       (make-array (length obj-list) :initial-contents obj-list))))
 
 (defun init-data ()
@@ -201,7 +205,7 @@
                (>= (+ scroll +screen-w+) x))
       (case obj-type
         ((:fire :koura)
-         (let ((new-pos (gamekit:vec2 (+ (- x scroll) r) (+ y r))))
+         (let ((new-pos (gamekit:vec2 (- (+ x r) scroll) (+ y r))))
            (gamekit:draw-circle new-pos r :fill-paint color
                                 :stroke-paint *stroke-paint*)))
         (t
@@ -213,10 +217,10 @@
 (defun draw-circle-obj (obj scroll)
   (with-slots (px py r color) obj
     (when (and (>= (+ px r) scroll) ;;画面範囲内かどうか
-           (>= (+ scroll +screen-w+) (- px r)))
+               (>= (+ scroll +screen-w+) (- px r)))
       (let ((new-pos (gamekit:vec2 (- px scroll) py)))
-       (gamekit:draw-circle new-pos r :fill-paint color
-                     :stroke-paint *stroke-paint*)))))
+	(gamekit:draw-circle new-pos r :fill-paint color
+			     :stroke-paint *stroke-paint*)))))
 
 ;;描画　ステージの動かない矩形オブジェクト描画
 (defun draw-field ()
@@ -242,8 +246,9 @@
 ;;アイテムとか敵描画
 (defun draw-move-objs ()
   (with-slots (fire enemies koura items scroll) *p*
-    (dolist (f fire)
-      (draw-rect-obj f scroll))
+    ;;(dolist (f fire)
+    ;;  (draw-rect-obj f scroll))
+    (mapc (lambda (f) (draw-rect-obj f scroll)) fire)
     (dolist (enemy enemies)
       (draw-rect-obj enemy scroll))
     (dolist (item items)
@@ -255,8 +260,8 @@
 ;;座標を表示するよ
 (defun draw-debug ()
   (with-slots (left right z) *keystate*
-    (with-slots (pos vx vy x y muteki-time koura) *p*
-      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d muteki:~d" x y vx vy muteki-time)
+    (with-slots (pos vx vy x y muteki-time koura scroll) *p*
+      (gamekit:draw-text (format nil "player-x:~d player-y:~d vx:~d vy:~d muteki:~d scroll:~d" x y vx vy muteki-time scroll)
                          (gamekit:vec2 100 300)))))
     ;;(gamekit:draw-text (format nil " left    :~:[ no ~; yes ~] " left) (gamekit:vec2 100 100))
     ;;(gamekit:draw-text (format nil " right    :~:[ no ~; yes ~] " right) (gamekit:vec2 100 200))
@@ -294,7 +299,7 @@
                  (>= x2 scroll) (>= (+ scroll +screen-w+) x) (>= +screen-h+ y 0)) ;;画面範囲内かどうか
         ;;一度画面内に入ったら動かす
         (setf state :move))
-      (when state ;;画面内に入るまで待機させておく
+      (when state ;;画面内に入るまで動かない
         (kuribo-move obj)
         (when (> 0 y) ;;画面下に落ちたら消す
           (setf (slot-value *p* slot-name) (remove obj (slot-value *p* slot-name) :test #'equal)))))))
@@ -323,53 +328,59 @@
           (t ;;画面外に出たら消す
             (setf fire (remove f fire :test #'equal))))))))
 
-
+;;ファイアーボール生成
+(defun make-fire (x x2 y y2 lasty vx)
+  (make-instance 'chara :vx vx :vy 0 :color *red*
+			:x x :x2 x2 :y y :y2 y2
+			:lasty lasty :width *fire-2r* :height *fire-2r*
+			:r *fire-r* :state nil
+			:obj-type :fire))
 
 ;;プレーヤーが動くよ🧢👨
 (defun update-player ()
-  (with-slots (pos x x2 y y2 vx vy lasty scroll width height muteki-time fire-time state fire) *p*
-    ;;(setf (gamekit:x lastpos) x)
-    (when (left *keystate*)
-      (decf x vx))
-    (when (right *keystate*)
-      (incf x vx))
-    (if (down *keystate*)
-        (when (not (eq state :small))
-          (setf height *obj-h*
-                y2 (+ y height)))
-        (when (not (eq state :small))
-           (setf height (* *obj-h* 2)
-                 y2 (+ y height))))
-    (if (and (x *keystate*) (= vy 0))
-        (setf vy 18))
-    (when (z *keystate*) ;;ファイアー
-      (when (and (eq state :fire)
-                 (= fire-time 0))
-        (push (make-instance 'chara :vx 3 :vy 0 :color *red*
-                             :x x2 :x2 (+ x *fire-2r*) :y (- y2 *fire-2r*) :y2 y2
-                             :lasty (- y2 *fire-2r*) :width *fire-2r* :height *fire-2r*
-                             :r *fire-r* :state nil
-                             :obj-type :fire)
-              fire)
-        (setf fire-time 50)))
-    ;;プレイヤーのy座標更新
-    (let ((temp y))
-      (incf y (+ (- y lasty) vy))
-      (setf lasty temp
-            x2 (+ x width)
-            y2 (+ y height)))
-    (when (> muteki-time 0)
-      (decf muteki-time))
-    (when (> fire-time 0)
-      (decf fire-time))
-    (when (> 0 y)
-      (setf state :dead))
-    (when (eq state :dead)
-      (init-data))))
-
-;;     y 0 1 3 6 10 15 21 ...
-;; lasty 0 0 1 3  6 10 15 ...
-;;    vy 1 1 1 1  1  1  1 ...
+  (with-slots (dir x x2 y y2 vx vy lasty width height muteki-time fire-time state fire) *p*
+    (let ((new-vx vx))
+      (when (z *keystate*) ;;zキー
+	(setf new-vx (+ vx 2))
+	(when (and (eq state :fire) ;;ファイアマリオ状態
+		   (= fire-time 0))
+	  (let ((fireball
+		  (if (eq dir :right)
+		      (make-fire x2 (+ x2 *fire-2r*) (- y2 *fire-2r*) y2 (- y2 *fire-2r*) *fire-vx*)
+		      (make-fire (- x *fire-2r*) x (- y2 *fire-2r*) y2 (- y2 *fire-2r*) (- *fire-vx*)))))
+	    (push fireball fire))
+	  (setf fire-time 50)))
+      (when (left *keystate*)
+	(setf dir :left)
+	(decf x new-vx))
+      (when (right *keystate*)
+	(setf dir :right)
+	(incf x new-vx))
+      (if (down *keystate*)
+	  (when (not (eq state :small))
+	    (setf height *obj-h*
+		  y2 (+ y height)))
+	  (when (and (not (eq state :small))
+		     (> (* *obj-h* 2) height))
+	    (setf height (* *obj-h* 2)
+		  y2 (+ y height))))
+      (if (and (x *keystate*) (= vy 0))
+	  (setf vy (+ *jump-power* new-vx)))
+    
+      ;;プレイヤーのy座標更新
+      (let ((temp y))
+	(incf y (+ (- y lasty) vy))
+	(setf lasty temp
+	      x2 (+ x width)
+	      y2 (+ y height)))
+      (when (> muteki-time 0) ;;無敵中だったら無敵時間減らす
+	(decf muteki-time))
+      (when (> fire-time 0) ;;ファイアーのクールタイム
+	(decf fire-time))
+      (when (> 0 y) ;;落下して死亡
+	(setf state :dead))
+      (when (eq state :dead) ;;死亡してたらリセット
+	(init-data)))))
 
 ;;画面スクロール
 (defun update-scroll ()
@@ -696,7 +707,7 @@
 (defmethod gamekit:act ((app mogeo))
   (update-player)
   (update-all-move-obj)
-  ;;(update-fire)
+  (update-fire)
   (update-scroll)
   (hit-player-objects)
   (hit-fire-enemies)
