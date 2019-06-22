@@ -1,7 +1,6 @@
 ;;もげお by もげぞうβ
-;;TODO ノコノコ踏んだら甲羅（ボール）のこしたい
+;;TODO
 ;;
-(ql:quickload :trivial-gamekit)
 
 (load "stage.lisp")
 
@@ -18,11 +17,13 @@
 
 (defparameter *fire-r* 10)
 (defparameter *fire-2r* (* *fire-r* 2))
-(defparameter *fire-vx* 3)
+(defparameter *fire-vx* 4)
 (defparameter *koura-r* 16)
 (defparameter *koura-2r* (* *koura-r* 2))
 
 (defparameter *jump-power* 16)
+(defparameter *mogeo-ax+* 0.08) ;;キー押してるときの加速
+(defparameter *mogeo-ax-* 0.04) ;;キー放したときの減速
 
 ;;画面サイズ
 (defparameter +screen-w+ (* *obj-w* *yoko*))
@@ -339,9 +340,9 @@
 ;;プレーヤーが動くよ🧢👨
 (defun update-player ()
   (with-slots (dir x x2 y y2 vx vy lasty width height muteki-time fire-time state fire) *p*
-    (let ((new-vx vx))
+    (let ((maxvx 2))
       (when (z *keystate*) ;;zキー
-	(setf new-vx (+ vx 2))
+	(setf maxvx 4) ;;ダッシュ仮
 	(when (and (eq state :fire) ;;ファイアマリオ状態
 		   (= fire-time 0))
 	  (let ((fireball
@@ -350,13 +351,25 @@
 		      (make-fire (- x *fire-2r*) x (- y2 *fire-2r*) y2 (- y2 *fire-2r*) (- *fire-vx*)))))
 	    (push fireball fire))
 	  (setf fire-time 50)))
-      (when (left *keystate*)
-	(setf dir :left)
-	(decf x new-vx))
-      (when (right *keystate*)
-	(setf dir :right)
-	(incf x new-vx))
-      (if (down *keystate*)
+      (when (left *keystate*) ;;左キー
+	(setf dir :left) ;;左向きにセット
+	(cond ;; maxvxまで加速or減速
+	  ((> vx (- maxvx)) (decf vx *mogeo-ax+*))
+	  ((> (- maxvx) vx) (incf vx *mogeo-ax+*))))
+      (when (right *keystate*) ;;右キー
+	(setf dir :right) ;;右向きにセット
+	(cond ;; maxvxまで加速or減速
+	  ((> maxvx vx) (incf vx *mogeo-ax+*))
+	  ((> vx maxvx) (decf vx *mogeo-ax+*))))
+      (when (and (null (left *keystate*)) ;;左右キーどちらも押してなかったら
+		 (null (right *keystate*)))
+	(cond ;;徐々に減速
+	  ((> vx 0) (setf vx (max 0 (- vx *mogeo-ax-*))))
+	  ((< vx 0) (setf vx (min 0 (+ vx *mogeo-ax-*))))))
+      ;;x座標更新
+      (incf x vx)
+      ;;下キー
+      (if (down *keystate*) 
 	  (when (not (eq state :small))
 	    (setf height *obj-h*
 		  y2 (+ y height)))
@@ -364,8 +377,9 @@
 		     (> (* *obj-h* 2) height))
 	    (setf height (* *obj-h* 2)
 		  y2 (+ y height))))
+      ;;xキー
       (if (and (x *keystate*) (= vy 0))
-	  (setf vy (+ *jump-power* new-vx)))
+	  (setf vy (+ *jump-power* (abs vx))))
     
       ;;プレイヤーのy座標更新
       (let ((temp y))
