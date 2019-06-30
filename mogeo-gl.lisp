@@ -43,12 +43,16 @@
 (defparameter *kinoko*     (gamekit:vec4 0.973 0.22 0 1))
 (defparameter *flower*     (gamekit:vec4 0.973 0.72 0.01 1))
 
+(defparameter *color-list*
+  (list *light-blue* *yellow* *brown* *brown2* *red* *green* *kuribo*
+	*nokonoko* *flag* *kinoko* *flower*))
+
 ;; 1:地面ブロック 2:壊せるブロック 3:土管
 ;; 4:1コインはてな 5:きのこetcはてな 6:スターはてな 7:1UPはてな
 ;; 8:隠し1UPはてな 9:10コインはてな
 ;; a:クリボー b:ノコノコ
 ;; z:入れる土管 y:ゴール
-(defparameter *obj-type-list*
+(defparameter *obj-type-list* ;;マップ番号に対応する色とobj-type
   `(1 (,*brown*  :hard-block) 2 (,*brown2*     :soft-block)   3 (,*green*  :dokan)
     4 (,*yellow* :1coin)      5 (,*yellow*     :item)         6 (,*yellow* :star)
     7 (,*yellow* :1up)        8 (,*light-blue* :hide-1up)     9 (,*yellow* :10coin)
@@ -99,6 +103,7 @@
 (defclass chara (obj)
   ((vx      :accessor vx      :initform 0      :initarg :vx)      ;;x方向スピード
    (vy      :accessor vy      :initform 0      :initarg :vy)      ;;y方向スピード
+   (ay      :accessor ay      :initform 0      :initarg :ay)      ;;y方向加速度？
    (dir     :accessor dor     :initform :right :initarg :dir)     ;;向き
    (lasty   :accessor lastt   :initform 0      :initarg :lasty)   ;;一個前のy
    (jump    :accessor jump    :initform nil    :initarg :jump)    ;;ジャンプ中フラグ
@@ -112,6 +117,7 @@
    (scroll      :accessor scroll      :initform 0   :initarg :scroll)      ;;スクロール
    (fire        :accessor fire        :initform nil :initarg :fire)        ;;ファイアーボールリスト
    (muteki-time :accessor muteki-time :initform 0   :initarg :muteki-time) ;;敵と接触したときの無敵時間
+   (star-time   :accessor star-time   :initform 0   :initarg :star-time)   ;;スター無敵時間
    (fire-time   :accessor fire-time   :initform 0   :initarg :fire-time)   ;;ファイアーボール打てる間隔
    (items       :accessor items       :initform nil :initarg :items)       ;;アイテムリスト
    (koura       :accessor koura       :initform nil :initarg :koura)       ;;ノコノコの甲羅リスト
@@ -235,12 +241,14 @@
 
 ;;プレイヤー描画
 (defun draw-player ()
-  (with-slots (x y scroll width height muteki-time color) *p*
+  (with-slots (x y scroll width height star-time muteki-time color state) *p*
     (let ((new-pos (gamekit:vec2 (- x scroll) y)))
-      (if (> muteki-time 0) ;;敵と接触したら点滅させる
-       (when (not (zerop (mod muteki-time 5)))
-          (gamekit:draw-rect new-pos width height :fill-paint color))
-       (gamekit:draw-rect new-pos width height :fill-paint color)))))
+      (if (> star-time 0) ;;スター
+	  (gamekit:draw-rect new-pos width height :fill-paint *yellow*)
+	  (if (> muteki-time 0) ;;敵と接触したら点滅させる
+	      (when (not (zerop (mod muteki-time 5)))
+		(gamekit:draw-rect new-pos width height :fill-paint color))
+	      (gamekit:draw-rect new-pos width height :fill-paint color))))))
 
 
 
@@ -317,29 +325,29 @@
     (dolist (f fire)
       (with-slots (x x2 y y2 lasty width height vx vy) f
        (cond
-          ((and (>= x2 scroll) ;;画面範囲内かどうか
-                (>= (+ scroll +screen-w+) x)
-                (>= +screen-h+ y 0))
-           (incf x vx) ;;x方向
-           (let ((temp y)) ;;y方向
-             (incf y (+ (- y lasty) vy))
-             (setf lasty temp
-                   x2 (+ x width)
-                   y2 (+ y height))))
-          (t ;;画面外に出たら消す
-            (setf fire (remove f fire :test #'equal))))))))
+	 ((and (>= x2 scroll) ;;画面範囲内かどうか
+	       (>= (+ scroll +screen-w+) x)
+	       (>= +screen-h+ y 0))
+	  (incf x vx) ;;x方向
+	  (let ((temp y)) ;;y方向
+	    (incf y (+ (- y lasty) vy))
+	    (setf lasty temp
+		  x2 (+ x width)
+		  y2 (+ y height))))
+	 (t ;;画面外に出たら消す
+	  (setf fire (remove f fire :test #'equal))))))))
 
 ;;ファイアーボール生成
 (defun make-fire (x x2 y y2 lasty vx)
   (make-instance 'chara :vx vx :vy 0 :color *red*
-			:x x :x2 x2 :y y :y2 y2
+			:x x :x2 x2 :y y :y2 y2 :ay 7
 			:lasty lasty :width *fire-2r* :height *fire-2r*
 			:r *fire-r* :state nil
 			:obj-type :fire))
 
 ;;プレーヤーが動くよ🧢👨
 (defun update-player ()
-  (with-slots (dir x x2 y y2 vx vy lasty width height muteki-time fire-time state fire) *p*
+  (with-slots (dir x x2 y y2 vx vy lasty width height muteki-time fire-time star-time state fire) *p*
     (let ((maxvx 2))
       (when (z *keystate*) ;;zキー
 	(setf maxvx 4) ;;ダッシュ仮
@@ -391,6 +399,8 @@
 	(decf muteki-time))
       (when (> fire-time 0) ;;ファイアーのクールタイム
 	(decf fire-time))
+      (when (> star-time 0) ;;スタータイム
+	(decf star-time))
       (when (> 0 y) ;;落下して死亡
 	(setf state :dead))
       (when (eq state :dead) ;;死亡してたらリセット
@@ -429,8 +439,7 @@
            (debug-format "left")
            :left-hit)
     ;;ボールの右とブロックの左にあたった
-          ((and (>= x2 px b1x) (> vx 0)
-                               (>= y2 py y))
+          ((and (>= x2 px b1x) (> vx 0) (>= y2 py y))
            (debug-format "right")
            :right-hit)
     ;;当たらなかった
@@ -475,6 +484,13 @@
    ;;(debug-format "~A (~A,~A) (~A,~A) MIGI HOSEI!" (get-universal-time) obj-x obj-y p-x p-y)
         :right-hit)))))
 
+;;
+(defun make-inst-chara (x x2 y y2 lasty vx vy ay color obj-type)
+  (make-instance 'chara :vx vx :vy vy :color color
+			:x x :x2 x2 :y y :y2 y2 :ay ay
+			:lasty lasty  :state nil
+			:obj-type obj-type))
+
 ;; プレイヤーとブロックがあたったら
 (defun hit-player-block (obj)
   (with-slots (obj-type color x x2 y y2 pos height) obj
@@ -482,7 +498,13 @@
       (case obj-type
        (:soft-block ;;壊れるブロック
          (when (not (eq state :small))
-            (setf *field* (remove obj *field* :test #'equal))))
+	   (setf *field* (remove obj *field* :test #'equal))))
+       (:star ;;スターブロック
+	(setf obj-type :hard-block
+	      color *brown*)
+	(push
+	 (make-inst-chara x x2 y2 (+ y2 *obj-h*) y2 2 0 10 *yellow* :star)
+	 items))
        (:item ;;アイテムが出るハテナブロック
          (setf obj-type :hard-block
                 color *brown*)
@@ -490,14 +512,12 @@
             (:small (push (make-instance 'chara :vx 1 :vy 0 :color *kinoko* :fall nil
                            :width *obj-w* :height *obj-h*
                            :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*)
-                           :pos (gamekit:vec2 x y2)
                            :obj-type :kinoko :state nil
                            :lasty y2)
                      items))
             (:big (push (make-instance 'chara :vx 0 :vy 0 :color *flower* :fall nil
                          :width *obj-w* :height *obj-h*
                          :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*)
-                         :pos (gamekit:vec2 x y2)
                          :obj-type :flower :state nil
                          :lasty y2)
                    items))))))))
@@ -534,64 +554,72 @@
 
 ;;プレイヤーと敵の当たり判定
 (defun hit-player-enemies ()
-  (with-slots (enemies items koura state height muteki-time d-hit color) *p*
+  (with-slots (enemies items koura state height star-time muteki-time d-hit color) *p*
     (dolist (obj enemies)
-      (let ((hit-dir (obj-hit-p *p* obj)))
-        (when hit-dir
-          (case (obj-type obj)
-            ((:kuribo :nokonoko)
-             (if (eq hit-dir :bot-hit) ;;踏んづけてたら
-                 (with-slots (x y y2) obj
-                   (setf enemies (remove obj enemies :test #'equal)
-                         d-hit obj
-                         (y *p*) (1+ y2))
-                   (when (eq (obj-type obj) :nokonoko)
-                     (push (make-instance 'chara :vx 0 :vy 0 :x x :x2 (+ x *koura-2r*) :y y :y2 (+ y *koura-2r*)
-                                            :width *koura-2r* :height *koura-2r* :lasty y
-                                            :r *koura-r* :state nil
-                                            :color *nokonoko* :obj-type :koura)
-                           koura)
-                     (return)))
-                 (cond
-                   ((and (= muteki-time 0) ;;無敵ではなくチビ状態だったら死亡
-                         (eq state :small))
-                    (setf state :dead))
-                   ((not (eq state :small)) ;;チビ以外のときはチビ状態にして無敵状態にする
-                    (setf state :small
-                          color *red*
-                          muteki-time 100
-                          height *obj-h*)))))))))))
+      (when (not (eq (state obj) :dead)) ;;敵が死亡状態ではない
+	(let ((hit-dir (obj-hit-p *p* obj)))
+	  (when hit-dir
+	    (if (> star-time 0) ;;プレイヤーがスターだったら
+		(setf (state obj) :dead-jump
+		      (vy obj) 12)
+		(case (obj-type obj)
+		  ((:kuribo :nokonoko)
+		   (if (eq hit-dir :bot-hit) ;;踏んづけてたら
+		       (with-slots (x y y2) obj
+			 (setf enemies (remove obj enemies :test #'equal)
+			       d-hit obj
+			       (y *p*) (1+ y2))
+			 (when (eq (obj-type obj) :nokonoko)
+			   (push (make-instance 'chara :vx 0 :vy 0 :x x :x2 (+ x *koura-2r*) :y y :y2 (+ y *koura-2r*)
+						       :width *koura-2r* :height *koura-2r* :lasty y
+						       :r *koura-r* :state nil
+						       :color *nokonoko* :obj-type :koura)
+				 koura)
+			   (return)))
+		       (cond
+			 ((and (= muteki-time 0) ;;無敵ではなくチビ状態だったら死亡
+			       (eq state :small))
+			  (setf state :dead))
+			 ((not (eq state :small)) ;;チビ以外のときはチビ状態にして無敵状態にする
+			  (setf state :small
+				color *red*
+				muteki-time 100
+				height *obj-h*)))))))))))))
 
 ;;プレイヤーと甲羅の当たり判定
 (defun hit-player-koura ()
-  (with-slots (koura d-hit state muteki-time height color) *p*
+  (with-slots (koura d-hit state star-time muteki-time height color) *p*
     (dolist (k koura)
-      (with-slots (vx) k
-        (let ((dir (obj-hit-p *p* k)))
-          (cond
-            ((and (= vx 0) dir) ;;甲羅が止まっていてかつプレイヤーと当たってる
-             (if (>= (rect-center-x (x *p*)) (rect-center-x (x k)))
-                 (setf (vx k) -3
-                       (x k) (- (x *p*) (width k)))
-                 (setf vx 3
-                       (x k) (x2 *p*)))
-             (debug-format "vx:~d vy: ~d" (vx k) (vy k)))
-            ((and (/= vx 0) (eq dir :bot-hit)) ;;甲羅が動いているときにプレイヤーが踏んづける
-             (setf vx 0 ;;甲羅のvx
-                   d-hit k))
-            ((and (/= vx 0) dir (= muteki-time 0))
-             (cond
-               ((eq state :small)
-                (setf state :dead))
-               ((not (eq state :small)) ;;チビ以外のときはチビ状態にして無敵状態にする
-                (setf state :small
-                      color *red*
-                      muteki-time 100
-                      height *obj-h*))))))))))
+      (when (not (eq (state k) :dead))
+	(with-slots (vx) k
+	  (let ((dir (obj-hit-p *p* k)))
+	    (cond
+	      ((and dir (> star-time 0)) ;;スター中に甲羅と当たたら
+	       (setf (state k) :dead-jump
+		     (vy k) 12)) ;;ちょっとジャンプさせる
+	      ((and (= vx 0) dir) ;;甲羅が止まっていてかつプレイヤーと当たってる
+	       (if (>= (rect-center-x (x *p*)) (rect-center-x (x k)))
+		   (setf (vx k) -3
+			 (x k) (- (x *p*) (width k)))
+		   (setf vx 3
+			 (x k) (x2 *p*)))
+	       (debug-format "vx:~d vy: ~d" (vx k) (vy k)))
+	      ((and (/= vx 0) (eq dir :bot-hit)) ;;甲羅が動いているときにプレイヤーが踏んづける
+	       (setf vx 0 ;;甲羅のvx
+		     d-hit k))
+	      ((and (/= vx 0) dir (= muteki-time 0))
+	       (cond
+		 ((eq state :small)
+		  (setf state :dead))
+		 ((not (eq state :small)) ;;チビ以外のときはチビ状態にして無敵状態にする
+		  (setf state :small
+			color *red*
+			muteki-time 100
+			height *obj-h*)))))))))))
 
 ;;プレイヤーとアイテムの当たり判定
 (defun hit-player-items ()
-  (with-slots (items state height color y y2) *p*
+  (with-slots (items state height color y y2 star-time) *p*
     (dolist (item items)
       (when (obj-hit-p *p* item)
         (with-slots (obj-type) item
@@ -605,7 +633,7 @@
                            y2 (+ y height)
                            color *flower*
                            items (remove item items :test #'equalp)))
-            (:star   (setf state :muteki
+            (:star   (setf star-time 400
                            items (remove item items :test #'equalp)))))))))
 
 ;;obj1とobj2がぶつかってたらobj2を保存
@@ -637,22 +665,26 @@
 
 
 
-;;ファイアーボールの位置補正と速度変更
-(defun fire-position-hosei ()
-  (with-slots (fire) *p*
-    (dolist (f fire)
-      (with-slots (x x2 y y2 width height lasty vx vy u-hit d-hit l-hit r-hit) f
-        (when u-hit
-          (setf vy -0.5 y (y u-hit) y2 (+ y height) lasty (y u-hit)))
-        (when (and l-hit (null d-hit))
-          (setf fire (remove f fire :test #'equalp)))
-        (when (and r-hit (null d-hit))
-          (setf fire (remove f fire :test #'equalp)))
-        (when d-hit
-          (setf vy 7 y (y2 d-hit) y2 (+ y height) lasty (y2 d-hit)))
-        (when (null d-hit)
-          (setf vy -0.5))
-        (setf u-hit nil d-hit nil l-hit nil r-hit nil)))))
+;;ジャンプタイプの位置補正と速度変更
+(defun jump-type-position-hosei (obj)
+  (with-slots (x x2 y y2 width height lasty vx vy u-hit d-hit l-hit r-hit ay state obj-type) obj
+    (when u-hit
+      (setf vy -0.5 y (- (y u-hit) height) y2 (+ y height) lasty y))
+    (when (and l-hit (null d-hit))
+      (case obj-type
+	(:fire (setf state :dead))
+	(otherwise (setf vx (- vx)
+			 x (x2 l-hit)))))
+    (when (and r-hit (null d-hit))
+      (case obj-type
+	(:fire (setf state :dead))
+	(otherwise (setf vx (- vx)
+			 x (- (x r-hit) width)))))
+    (when d-hit
+      (setf vy ay y (y2 d-hit) y2 (+ y height) lasty y))
+    (when (null d-hit)
+      (setf vy -0.5))
+    (setf u-hit nil d-hit nil l-hit nil r-hit nil)))
 
 ;;動くobjの位置補正
 (defun position-hosei (obj)
@@ -677,30 +709,42 @@
       (when (eq (type-of obj) 'chara)
         (when (> vx 0)
           (setf vx (- vx)))))
-    (if d-hit ;;地面に設置してたり敵を踏んづけてたりしたら
-        (case (obj-type d-hit)
-          ((:kuribo :nokonoko :koura) ;;敵を踏んづけてたら跳ねる
-           (setf vy 14
-                 y (y2 d-hit)
-                 lasty (y2 d-hit)))
-          (otherwise
-            (setf vy 0
-                  y (y2 d-hit)
-                  lasty (y2 d-hit))))
-        (setf vy -1))
+    (cond
+      (d-hit ;;地面に設置してたり敵を踏んづけてたりしたら
+       (if (eq state :dead-jump)
+	   (setf state :dead)
+	   (case (obj-type d-hit)
+	     ((:kuribo :nokonoko :koura) ;;敵を踏んづけてたら跳ねる
+	      (setf vy 14
+		    y (y2 d-hit)
+		    lasty (y2 d-hit)))
+	     (otherwise
+	      (setf vy 0
+		    y (y2 d-hit)
+		    lasty (y2 d-hit))))))
+      (t (setf vy -1)))
     (setf u-hit nil d-hit nil l-hit nil r-hit nil)))
 
 ;;動くものの位置修正
 (defun all-position-hosei ()
   (with-slots (items enemies fire koura) *p*
     (position-hosei *p*)
-    (fire-position-hosei)
+    (dolist (f fire)
+      (jump-type-position-hosei f))
     (dolist (item items)
-      (position-hosei item))
+      (case (obj-type item)
+	(:star (jump-type-position-hosei item))
+	(otherwise (position-hosei item))))
     (dolist (enemy enemies)
       (position-hosei enemy))
     (dolist (k koura)
       (position-hosei k))))
+
+;;state=deadを消す
+(defun remove-dead-obj ()
+  (with-slots (items enemies fire koura) *p*
+    (setf fire (remove-if (lambda (x) (eq :dead (state x))) fire))
+    (setf items (remove-if (lambda (x) (eq :dead (state x))) items))))
 
 ;;プレイヤーとかの当たり判定 (アイテム 敵 障害物)
 (defun hit-player-objects ()
@@ -710,15 +754,15 @@
   (hit-player-koura)
   ;;動くobjと動かないobjとの当たり判定
   (loop :for obj across *field*
-        :for i from 0
-        :do (all-set-hit-obj obj))
+        :do (all-set-hit-obj obj)))
       ;; (dolist (mobj move-obj)
       ;; 	(set-hit-obj mobj obj)))
-  (all-position-hosei)) ;;ポジション補正
+  ;;(all-position-hosei)) ;;ポジション補正
 ;; 🐈🐈🐈🐈
 
 ;;ゲームループ？
 (defmethod gamekit:act ((app mogeo))
+  
   (update-player)
   (update-all-move-obj)
   (update-fire)
@@ -726,6 +770,8 @@
   (hit-player-objects)
   (hit-fire-enemies)
   (hit-koura-enemies)
+  (all-position-hosei)
+  (remove-dead-obj)
   (sleep 0.01))
 
 ;;描画
