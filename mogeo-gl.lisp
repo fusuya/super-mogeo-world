@@ -25,6 +25,10 @@
 (defparameter *mogeo-ax+* 0.08) ;;キー押してるときの加速
 (defparameter *mogeo-ax-* 0.04) ;;キー放したときの減速
 
+(defparameter *font* nil)
+;;(gamekit:define-font *font* "./font/Myrica.TTC")
+;;(defparameter *font24* (gamekit:make-font *font* 24))
+
 ;;画面サイズ
 (defparameter +screen-w+ (* *obj-w* *yoko*))
 (defparameter +screen-h+ (* *obj-h* *tate*))
@@ -97,6 +101,7 @@
    (x2     :accessor x2     :initform 0                  :initarg :x2)       ;;右端
    (y      :accessor y      :initform 0                  :initarg :y)        ;;下端
    (y2     :accessor y2     :initform 0                  :initarg :y2)       ;;上端
+   (hit    :accessor hit    :initform 0                  :initarg :hit)      ;;もげおとぶつかった回数
    (width  :accessor width  :initform *obj-w*            :initarg :width)    ;;幅
    (height :accessor height :initform *obj-h*            :initarg :height))) ;;高さ
 
@@ -114,6 +119,8 @@
 
 (defclass player (chara)
   ((field-w-max :accessor field-w-max :initform 0   :initarg :field-w-max) ;;ステージの幅
+   (coin        :accessor coin        :initform 0   :initarg :coin)        ;;コイン枚数
+   (zanki       :accessor zanki       :initform 2   :initarg :zanki)       ;;残機
    (scroll      :accessor scroll      :initform 0   :initarg :scroll)      ;;スクロール
    (fire        :accessor fire        :initform nil :initarg :fire)        ;;ファイアーボールリスト
    (muteki-time :accessor muteki-time :initform 0   :initarg :muteki-time) ;;敵と接触したときの無敵時間
@@ -265,6 +272,13 @@
     (dolist (k koura)
       (draw-rect-obj k scroll))))
 
+;;コイン枚数表示
+(defun draw-coin-and-zanki ()
+  (with-slots (coin zanki) *p*
+    (gamekit:draw-text (format nil "coin:~2,'0d" coin)
+		       (gamekit:vec2 500 (- +screen-h+ 30)))
+    (gamekit:draw-text (format nil "mogeo:~d" zanki)
+		       (gamekit:vec2 400 (- +screen-h+ 30)))))
 
 ;;座標を表示するよ
 (defun draw-debug ()
@@ -493,8 +507,8 @@
 
 ;; プレイヤーとブロックがあたったら
 (defun hit-player-block (obj)
-  (with-slots (obj-type color x x2 y y2 pos height) obj
-    (with-slots (state items) *p*
+  (with-slots (obj-type color x x2 y y2 pos height hit) obj
+    (with-slots (state items coin zanki) *p*
       (case obj-type
        (:soft-block ;;壊れるブロック
          (when (not (eq state :small))
@@ -504,6 +518,23 @@
 	      color *brown*)
 	(push
 	 (make-inst-chara x x2 y2 (+ y2 *obj-h*) y2 2 0 10 *yellow* :star)
+	 items))
+       (:1coin ;;１コイン
+	(setf obj-type :hard-block
+	      color *brown*)
+	(incf coin))
+       (:10coin ;;10コイン
+	(if (>= hit 10) ;;10回叩かれるまで
+	    (setf obj-type :hard-block
+		  color *brown*)
+	    (progn
+	      (incf hit)
+	      (incf coin))))
+       ((:1up :hide-1up)
+	(setf obj-type :hard-block
+	      color *brown*)
+	(push
+	 (make-inst-chara x x2 y2 (+ y2 *obj-h*) y2 1 0 10 *green* :1up)
 	 items))
        (:item ;;アイテムが出るハテナブロック
          (setf obj-type :hard-block
@@ -515,11 +546,12 @@
                            :obj-type :kinoko :state nil
                            :lasty y2)
                      items))
-            (:big (push (make-instance 'chara :vx 0 :vy 0 :color *flower* :fall nil
-                         :width *obj-w* :height *obj-h*
-                         :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*)
-                         :obj-type :flower :state nil
-                         :lasty y2)
+            ((:big :fire)
+	     (push (make-instance 'chara :vx 0 :vy 0 :color *flower* :fall nil
+					 :width *obj-w* :height *obj-h*
+					 :x x :x2 x2 :y y2 :y2 (+ y2 *obj-h*)
+					 :obj-type :flower :state nil
+					 :lasty y2)
                    items))))))))
 
 ;;ファイアーと敵の当たり判定
@@ -619,7 +651,7 @@
 
 ;;プレイヤーとアイテムの当たり判定
 (defun hit-player-items ()
-  (with-slots (items state height color y y2 star-time) *p*
+  (with-slots (items state height color y y2 star-time zanki) *p*
     (dolist (item items)
       (when (obj-hit-p *p* item)
         (with-slots (obj-type) item
@@ -633,6 +665,9 @@
                            y2 (+ y height)
                            color *flower*
                            items (remove item items :test #'equalp)))
+	    (:1up
+	     (incf zanki)
+	     (setf items (remove item items :test #'equal)))
             (:star   (setf star-time 400
                            items (remove item items :test #'equalp)))))))))
 
@@ -780,6 +815,7 @@
   (draw-field)
   (draw-player)
   (draw-move-objs)
+  (draw-coin-and-zanki)
   (draw-debug)
   (draw-console))
 
